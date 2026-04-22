@@ -1,0 +1,26 @@
+.text-success { color: var(--success); }
+.text-danger { color: var(--danger); }
+
+.selected-input {
+  border-color: var(--accent-primary) !important;
+  color: var(--accent-primary) !important;
+  font-weight: 600;
+  background: rgba(59, 130, 246, 0.1) !important;
+}
+
+.row-selected {
+  background: rgba(59, 130, 246, 0.1) !important;
+  border-left: 3px solid var(--accent-primary);
+}
+
+.select-btn {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  padding: 0.4rem 0.8rem;
+}
+
+.select-btn:hover {
+  background: var(--accent-primary);
+  color: white;
+}

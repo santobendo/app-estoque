@@ -1,0 +1,22 @@
+.app-layout {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.main-content {
+  flex: 1;
+  padding: 1rem 1rem 1rem 0;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.content-wrapper {
+  flex: 1;
+  padding: 2rem;
+  overflow-y: auto;
+  border-radius: 16px;
+  background: rgba(30, 41, 59, 0.4); /* Slightly more transparent than regular glass */
+}
