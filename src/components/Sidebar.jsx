@@ -8,7 +8,8 @@ import {
   ShoppingCart, 
   History,
   Menu,
-  X
+  X,
+  PlusCircle
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -16,7 +17,8 @@ const Sidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
 
   const navItems = [
-    { path: '/', icon: <LayoutDashboard size={22} />, label: 'Gestão' },
+    { path: '/', icon: <LayoutDashboard size={22} />, label: 'Catálogo' },
+    { path: '/cadastro', icon: <PlusCircle size={22} />, label: 'Novo Produto' },
     { path: '/entradas', icon: <ArrowDownToLine size={22} />, label: 'Entradas' },
     { path: '/saidas', icon: <ArrowUpFromLine size={22} />, label: 'Saídas' },
     { path: '/ajustes', icon: <Settings2 size={22} />, label: 'Ajustes' },

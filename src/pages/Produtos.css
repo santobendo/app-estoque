@@ -12,24 +12,7 @@
   margin-bottom: 0.5rem;
 }
 
-.management-grid {
-  display: grid;
-  grid-template-columns: 300px 1fr;
-  gap: 1.5rem;
-  flex: 1;
-  min-height: 0; /* Important for scroll to work in children */
-}
 
-.form-panel {
-  padding: 1.5rem;
-  height: max-content;
-}
-
-.form-panel h2 {
-  font-size: 1.1rem;
-  margin-bottom: 1.5rem;
-  color: var(--accent-secondary);
-}
 
 .table-panel {
   display: flex;
