@@ -16,13 +16,6 @@
 }
 
 @media print {
-  /* Hide unnecessary elements */
-  .sidebar, 
-  .no-print, 
-  .toggle-btn {
-    display: none !important;
-  }
-
   /* Reset backgrounds and colors for printing */
   body, 
   .app-layout, 
@@ -40,6 +33,13 @@
     height: auto !important;
     overflow: visible !important;
     display: block !important;
+  }
+
+  /* Hide unnecessary elements (After block reset to ensure they stay hidden) */
+  .sidebar, 
+  .no-print, 
+  .toggle-btn {
+    display: none !important;
   }
 
   /* Show print-specific header */
