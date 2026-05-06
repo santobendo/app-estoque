@@ -28,13 +28,18 @@
   .app-layout, 
   .main-content, 
   .content-wrapper,
-  .glass-panel {
+  .glass-panel,
+  .page-container,
+  .printable-table-container {
     background: white !important;
     color: black !important;
     box-shadow: none !important;
     border: none !important;
     padding: 0 !important;
     margin: 0 !important;
+    height: auto !important;
+    overflow: visible !important;
+    display: block !important;
   }
 
   /* Show print-specific header */
