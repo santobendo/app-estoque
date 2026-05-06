@@ -9,7 +9,8 @@ import {
   History,
   Menu,
   X,
-  PlusCircle
+  PlusCircle,
+  Printer
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -24,6 +25,7 @@ const Sidebar = () => {
     { path: '/ajustes', icon: <Settings2 size={22} />, label: 'Ajustes' },
     { path: '/compras', icon: <ShoppingCart size={22} />, label: 'Compras' },
     { path: '/historico', icon: <History size={22} />, label: 'Histórico' },
+    { path: '/relatorio', icon: <Printer size={22} />, label: 'Relatório' },
   ];
 
   return (

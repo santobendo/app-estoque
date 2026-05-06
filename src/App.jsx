@@ -7,6 +7,7 @@ import Movimentacoes from './pages/Movimentacoes';
 import Ajustes from './pages/Ajustes';
 import Compras from './pages/Compras';
 import Historico from './pages/Historico';
+import RelatorioEstoque from './pages/RelatorioEstoque';
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
         <Route path="ajustes" element={<Ajustes />} />
         <Route path="compras" element={<Compras />} />
         <Route path="historico" element={<Historico />} />
+        <Route path="relatorio" element={<RelatorioEstoque />} />
       </Route>
     </Routes>
   );
