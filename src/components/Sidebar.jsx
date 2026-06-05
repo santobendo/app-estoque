@@ -1,59 +1,114 @@
 import React, { useState } from 'react';
-import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  ArrowDownToLine, 
-  ArrowUpFromLine, 
-  Settings2, 
-  ShoppingCart, 
-  History,
-  Menu,
-  X,
-  PlusCircle,
-  Printer
+import { NavLink, useLocation } from 'react-router-dom';
+import {
+  Package,
+  Plus,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  SlidersHorizontal,
+  ShoppingCart,
+  Clock,
+  FileText,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Boxes,
 } from 'lucide-react';
 import './Sidebar.css';
 
+const NAV_SECTIONS = [
+  {
+    label: 'Estoque',
+    items: [
+      { path: '/',         icon: Package,           label: 'Catálogo',      end: true },
+      { path: '/cadastro', icon: Plus,               label: 'Novo Produto' },
+    ],
+  },
+  {
+    label: 'Movimentação',
+    items: [
+      { path: '/entradas', icon: ArrowDownToLine,    label: 'Entradas' },
+      { path: '/saidas',   icon: ArrowUpFromLine,    label: 'Saídas' },
+      { path: '/ajustes',  icon: SlidersHorizontal,  label: 'Ajustes' },
+    ],
+  },
+  {
+    label: 'Análise',
+    items: [
+      { path: '/compras',  icon: ShoppingCart,       label: 'Compras' },
+      { path: '/historico',icon: Clock,              label: 'Histórico' },
+      { path: '/relatorio',icon: FileText,           label: 'Relatório' },
+    ],
+  },
+];
+
 const Sidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
-
-  const navItems = [
-    { path: '/', icon: <LayoutDashboard size={22} />, label: 'Catálogo' },
-    { path: '/cadastro', icon: <PlusCircle size={22} />, label: 'Novo Produto' },
-    { path: '/entradas', icon: <ArrowDownToLine size={22} />, label: 'Entradas' },
-    { path: '/saidas', icon: <ArrowUpFromLine size={22} />, label: 'Saídas' },
-    { path: '/ajustes', icon: <Settings2 size={22} />, label: 'Ajustes' },
-    { path: '/compras', icon: <ShoppingCart size={22} />, label: 'Compras' },
-    { path: '/historico', icon: <History size={22} />, label: 'Histórico' },
-    { path: '/relatorio', icon: <Printer size={22} />, label: 'Relatório' },
-  ];
+  const location = useLocation();
 
   return (
-    <aside className={`sidebar glass-panel ${collapsed ? 'collapsed' : ''}`}>
-      <div className="sidebar-header">
-        {!collapsed && <h2 className="animate-fade-in">📦 Estoque Pro</h2>}
-        <button 
-          className="toggle-btn" 
-          onClick={() => setCollapsed(!collapsed)}
-          title={collapsed ? "Expandir" : "Recolher"}
-        >
-          {collapsed ? <Menu size={20} /> : <X size={20} />}
-        </button>
+    <aside className={`sidebar ${collapsed ? 'sidebar--collapsed' : ''}`}>
+
+      {/* ── Logo ── */}
+      <div className="sidebar__brand">
+        <div className="sidebar__logo">
+          <Boxes size={20} strokeWidth={2} />
+        </div>
+        {!collapsed && (
+          <div className="sidebar__brand-text">
+            <span className="sidebar__app-name">Estoque Pro</span>
+            <span className="sidebar__app-tag">Gestão de Inventário</span>
+          </div>
+        )}
       </div>
 
-      <nav className="sidebar-nav">
-        {navItems.map((item) => (
-          <NavLink 
-            key={item.path} 
-            to={item.path} 
-            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
-            title={collapsed ? item.label : ''}
-          >
-            <span className="nav-icon">{item.icon}</span>
-            {!collapsed && <span className="nav-label animate-fade-in">{item.label}</span>}
-          </NavLink>
+      {/* ── Navegação ── */}
+      <nav className="sidebar__nav">
+        {NAV_SECTIONS.map((section) => (
+          <div key={section.label} className="sidebar__section">
+            {!collapsed && (
+              <span className="sidebar__section-label">{section.label}</span>
+            )}
+
+            {section.items.map(({ path, icon: Icon, label, end }) => (
+              <NavLink
+                key={path}
+                to={path}
+                end={end}
+                className={({ isActive }) =>
+                  `sidebar__link ${isActive ? 'sidebar__link--active' : ''}`
+                }
+                title={collapsed ? label : undefined}
+              >
+                <span className="sidebar__link-icon">
+                  <Icon size={18} strokeWidth={2} />
+                </span>
+                {!collapsed && (
+                  <span className="sidebar__link-label">{label}</span>
+                )}
+                {!collapsed && (
+                  <span className="sidebar__link-dot" />
+                )}
+              </NavLink>
+            ))}
+          </div>
         ))}
       </nav>
+
+      {/* ── Rodapé / Toggle ── */}
+      <div className="sidebar__footer">
+        <div className="sidebar__separator" />
+        <button
+          className="sidebar__toggle"
+          onClick={() => setCollapsed(!collapsed)}
+          title={collapsed ? 'Expandir menu' : 'Recolher menu'}
+        >
+          {collapsed
+            ? <PanelLeftOpen  size={18} strokeWidth={2} />
+            : <PanelLeftClose size={18} strokeWidth={2} />
+          }
+          {!collapsed && <span>Recolher</span>}
+        </button>
+      </div>
     </aside>
   );
 };
