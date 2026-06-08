@@ -1,20 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Search, Edit2, Trash2, X, Save } from 'lucide-react';
-import './Produtos.css';
 
 const UNIDADES = [
-  "Un (unidades)", "Kg (quilos)", "Gr (gramas)", "Mt (metros)",
-  "Cm (centímetros)", "Lt (litros)", "Ml (mililitros)", "Cx (caixa)",
-  "Pc (pacote)", "Dz (dúzia)", "Pl (palete)", "Pr (par)"
+  'Un (unidades)', 'Kg (quilos)', 'Gr (gramas)', 'Mt (metros)',
+  'Cm (centímetros)', 'Lt (litros)', 'Ml (mililitros)', 'Cx (caixa)',
+  'Pc (pacote)', 'Dz (dúzia)', 'Pl (palete)', 'Pr (par)',
 ];
 
 const Produtos = () => {
   const [produtos, setProdutos] = useState([]);
   const [busca, setBusca] = useState('');
   const [loading, setLoading] = useState(true);
-
-  // Edit states
   const [editingId, setEditingId] = useState(null);
   const [editNome, setEditNome] = useState('');
   const [editUnidade, setEditUnidade] = useState('');
@@ -22,7 +19,7 @@ const Produtos = () => {
   const fetchProdutos = async () => {
     setLoading(true);
     let query = supabase.from('produtos').select('*').order('nome');
-    
+
     if (busca) {
       query = query.ilike('nome', `%${busca}%`);
     }
@@ -42,7 +39,7 @@ const Produtos = () => {
 
   const handleDelete = async (id, nomeProduto) => {
     if (!window.confirm(`Excluir '${nomeProduto}' e todo seu histórico permanentemente?`)) return;
-    
+
     const { error } = await supabase.from('produtos').delete().eq('id', id);
     if (error) {
       alert('Erro ao excluir produto.');
@@ -78,27 +75,28 @@ const Produtos = () => {
   };
 
   return (
-    <div className="page-container animate-fade-in">
-      <div className="header-section">
-        <h1>Catálogo de Produtos</h1>
-        <p style={{ color: 'var(--text-muted)' }}>Gerencie os itens do seu estoque. Para novos cadastros, use a aba "Novo Produto".</p>
+    <div className="flex flex-col h-full gap-6 animate-fade-in">
+      <div className="space-y-2">
+        <h1 className="text-3xl font-bold">Catálogo de Produtos</h1>
+        <p className="text-slate-400">Gerencie os itens do seu estoque. Para novos cadastros, use a aba "Novo Produto".</p>
       </div>
 
-      <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', padding: '1.5rem', gap: '1rem', flex: 1, minHeight: 0 }}>
-        <div className="table-header-actions" style={{ justifyContent: 'flex-start' }}>
-          <div className="search-box" style={{ width: '400px' }}>
+      <div className="glass-panel flex flex-col p-6 gap-6 flex-1 min-h-0">
+        <div className="flex justify-start">
+          <div className="search-box">
             <Search size={18} className="search-icon" />
-            <input 
-              type="text" 
-              placeholder="Buscar produtos por nome..." 
+            <input
+              type="text"
+              className="pl-11"
+              placeholder="Buscar produtos por nome..."
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
           </div>
         </div>
 
-        <div className="table-container" style={{ flex: 1 }}>
-          <table>
+        <div className="table-container flex-1">
+          <table className="min-w-full">
             <thead>
               <tr>
                 <th>ID</th>
@@ -111,41 +109,43 @@ const Produtos = () => {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="6" style={{textAlign: 'center'}}>Carregando...</td></tr>
+                <tr>
+                  <td colSpan="6" className="text-center py-8">Carregando...</td>
+                </tr>
               ) : produtos.length === 0 ? (
-                <tr><td colSpan="6" style={{textAlign: 'center'}}>Nenhum produto encontrado.</td></tr>
+                <tr>
+                  <td colSpan="6" className="text-center py-8">Nenhum produto encontrado.</td>
+                </tr>
               ) : (
                 produtos.map((p) => (
-                  <tr key={p.id}>
-                    <td>#{p.id}</td>
-                    
-                    {/* NOME COLUMN */}
-                    <td style={{fontWeight: 500}}>
-                      {editingId === p.id ? (
-                        <input 
-                          type="text" 
-                          value={editNome} 
+                  <tr key={p.id} className="even:bg-white/5">
+                    <td className="font-medium">#{p.id}</td>
+                    <td className="font-semibold">{
+                      editingId === p.id ? (
+                        <input
+                          type="text"
+                          value={editNome}
                           onChange={(e) => setEditNome(e.target.value)}
-                          style={{ padding: '0.4rem', width: '100%' }}
+                          className="w-full bg-slate-950/60 border border-white/10 px-3 py-2 rounded-2xl"
                         />
-                      ) : p.nome}
-                    </td>
-
-                    {/* UNIDADE COLUMN */}
+                      ) : p.nome
+                    }</td>
                     <td>
                       {editingId === p.id ? (
-                        <select 
-                          value={editUnidade} 
+                        <select
+                          value={editUnidade}
                           onChange={(e) => setEditUnidade(e.target.value)}
-                          style={{ padding: '0.4rem' }}
+                          className="w-full bg-slate-950/60 border border-white/10 px-3 py-2 rounded-2xl"
                         >
-                          {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                          {UNIDADES.map((u) => (
+                            <option key={u} value={u}>{u}</option>
+                          ))}
                         </select>
-                      ) : p.unidade}
+                      ) : (
+                        p.unidade
+                      )}
                     </td>
-
                     <td>{Number(p.estoque).toFixed(2)}</td>
-                    
                     <td>
                       {p.estoque <= 5 ? (
                         <span className="badge badge-danger">⚠️ BAIXO</span>
@@ -153,12 +153,11 @@ const Produtos = () => {
                         <span className="badge badge-success">✅ OK</span>
                       )}
                     </td>
-                    
                     <td>
-                      <div className="action-buttons">
+                      <div className="flex flex-wrap gap-2">
                         {editingId === p.id ? (
                           <>
-                            <button className="icon-btn" style={{ color: 'var(--success)' }} onClick={handleSaveEdit} title="Salvar">
+                            <button className="icon-btn text-emerald-300" onClick={handleSaveEdit} title="Salvar">
                               <Save size={18} />
                             </button>
                             <button className="icon-btn danger" onClick={cancelEdit} title="Cancelar">

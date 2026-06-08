@@ -80,13 +80,13 @@ const Historico = () => {
     <div className="page-container animate-fade-in">
       <div className="header-section">
         <h1>Histórico de Movimentações</h1>
-        <p style={{ color: 'var(--text-muted)' }}>Acompanhe e audite todas as transações de estoque.</p>
+        <p>Acompanhe e audite todas as transações de estoque.</p>
       </div>
 
-      <div className="glass-panel" style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem', height: '100%' }}>
+      <div className="glass-panel flex flex-col p-6 gap-4 h-full min-h-0">
         
-        <div className="table-header-actions" style={{ justifyContent: 'flex-start' }}>
-          <div className="search-box" style={{ width: '400px' }}>
+        <div className="table-header-actions justify-start">
+          <div className="search-box w-96">
             <Search size={18} className="search-icon" />
             <input 
               type="text" 
@@ -97,7 +97,7 @@ const Historico = () => {
           </div>
         </div>
 
-        <div className="table-container" style={{ flex: 1 }}>
+        <div className="table-container flex-1 min-h-0">
           <table>
             <thead>
               <tr>
@@ -111,9 +111,9 @@ const Historico = () => {
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="6" style={{textAlign: 'center'}}>Carregando...</td></tr>
+                <tr><td colSpan="6" className="text-center py-8">Carregando...</td></tr>
               ) : historicoFiltrado.length === 0 ? (
-                <tr><td colSpan="6" style={{textAlign: 'center'}}>Nenhuma movimentação encontrada.</td></tr>
+                <tr><td colSpan="6" className="text-center py-8">Nenhuma movimentação encontrada.</td></tr>
               ) : (
                 historicoFiltrado.map((h) => {
                   const dataObj = new Date(h.data);
@@ -121,15 +121,15 @@ const Historico = () => {
                   
                   return (
                     <tr key={h.id}>
-                      <td style={{ color: 'var(--text-muted)' }}>#{h.id}</td>
-                      <td>{dataStr}</td>
-                      <td style={{fontWeight: 500}}>{h.produtos?.nome || 'Desconhecido'}</td>
+                      <td className="text-slate-500">#{h.id}</td>
+                      <td className="text-sm">{dataStr}</td>
+                      <td className="font-medium">{h.produtos?.nome || 'Desconhecido'}</td>
                       <td>
                         <span className={`badge ${getBadgeType(h.tipo)}`}>
                           {getIcon(h.tipo)}
                         </span>
                       </td>
-                      <td style={{ fontWeight: 600 }}>{Number(h.quantidade).toFixed(2)}</td>
+                      <td className="font-semibold">{Number(h.quantidade).toFixed(2)}</td>
                       <td>
                         <button 
                           className="icon-btn danger" 

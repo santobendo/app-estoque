@@ -64,14 +64,15 @@ const Ajustes = () => {
     <div className="page-container animate-fade-in">
       <div className="header-section">
         <h1>Ajuste de Inventário</h1>
+        <p>Ajuste o saldo de produtos baseado em contagem física.</p>
       </div>
 
       <div className="management-grid">
-        <div className="glass-panel form-panel">
-          <h2 style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--warning)' }}>
+        <div className="glass-panel form-panel p-6">
+          <h2 className="flex items-center gap-2 mb-6 text-amber-300 font-semibold">
             <Settings2 size={20} /> Definir Saldo Final
           </h2>
-          <form onSubmit={handleConfirmar}>
+          <form onSubmit={handleConfirmar} className="space-y-4">
             <div className="input-group">
               <label>Produto Selecionado</label>
               <input 
@@ -105,13 +106,13 @@ const Ajustes = () => {
               />
             </div>
 
-            <button type="submit" className="btn" style={{ background: 'var(--warning)', color: 'black', width: '100%', marginTop: '1rem', fontWeight: 'bold' }} disabled={loading}>
+            <button type="submit" className="btn w-full bg-amber-500 hover:bg-amber-600 text-white font-bold mt-4" disabled={loading}>
               <Settings2 size={18} /> Confirmar Ajuste
             </button>
           </form>
         </div>
 
-        <div className="glass-panel table-panel">
+        <div className="glass-panel table-panel p-6 flex flex-col gap-4">
           <div className="table-header-actions">
             <div className="search-box">
               <Search size={18} className="search-icon" />
@@ -124,7 +125,7 @@ const Ajustes = () => {
             </div>
           </div>
 
-          <div className="table-container">
+          <div className="table-container flex-1 min-h-0">
             <table>
               <thead>
                 <tr>
@@ -136,7 +137,7 @@ const Ajustes = () => {
               <tbody>
                 {produtos.map((p) => (
                   <tr key={p.id} className={produtoSelecionado?.id === p.id ? 'row-selected' : ''}>
-                    <td style={{fontWeight: 500}}>{p.nome}</td>
+                    <td className="font-medium">{p.nome}</td>
                     <td>{Number(p.estoque).toFixed(2)}</td>
                     <td>
                       <button 

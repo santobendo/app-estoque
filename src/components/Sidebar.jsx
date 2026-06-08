@@ -1,18 +1,17 @@
 import React, { useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import { 
-  LayoutDashboard, 
-  ArrowDownToLine, 
-  ArrowUpFromLine, 
-  Settings2, 
-  ShoppingCart, 
+import {
+  LayoutDashboard,
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  Settings2,
+  ShoppingCart,
   History,
   Menu,
   X,
   PlusCircle,
-  Printer
+  Printer,
 } from 'lucide-react';
-import './Sidebar.css';
 
 const Sidebar = () => {
   const [collapsed, setCollapsed] = useState(false);
@@ -29,28 +28,34 @@ const Sidebar = () => {
   ];
 
   return (
-    <aside className={`sidebar glass-panel ${collapsed ? 'collapsed' : ''}`}>
-      <div className="sidebar-header">
-        {!collapsed && <h2 className="animate-fade-in">📦 Estoque Pro</h2>}
-        <button 
-          className="toggle-btn" 
+    <aside className={`glass-panel flex-shrink-0 transition-all duration-300 ease-in-out ${collapsed ? 'w-20' : 'w-64'} h-screen m-4 flex flex-col sticky top-0 z-50 overflow-y-auto`}>
+      <div className="flex items-center justify-between p-6 border-b border-white/10 flex-shrink-0">
+        {!collapsed && <h2 className="text-lg font-bold text-blue-300 animate-fade-in">📦 Estoque Pro</h2>}
+        <button
+          className="bg-transparent text-slate-300 p-2 rounded-2xl hover:bg-white/10 transition"
           onClick={() => setCollapsed(!collapsed)}
-          title={collapsed ? "Expandir" : "Recolher"}
+          title={collapsed ? 'Expandir' : 'Recolher'}
         >
           {collapsed ? <Menu size={20} /> : <X size={20} />}
         </button>
       </div>
 
-      <nav className="sidebar-nav">
+      <nav className={`flex flex-col gap-2 p-4 flex-1 ${collapsed ? 'items-center' : ''}`}>
         {navItems.map((item) => (
-          <NavLink 
-            key={item.path} 
-            to={item.path} 
-            className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`}
+          <NavLink
+            key={item.path}
+            to={item.path}
+            className={({ isActive }) =>
+              `flex items-center gap-3 rounded-2xl transition duration-200 ease-out ${
+                isActive
+                  ? 'bg-blue-500/15 text-blue-300 border-l-4 border-blue-500 pl-4'
+                  : 'text-slate-300 hover:bg-white/10 hover:text-white'
+              } ${collapsed ? 'justify-center p-3' : 'px-4 py-3'}`
+            }
             title={collapsed ? item.label : ''}
           >
-            <span className="nav-icon">{item.icon}</span>
-            {!collapsed && <span className="nav-label animate-fade-in">{item.label}</span>}
+            <span className="flex items-center justify-center flex-shrink-0">{item.icon}</span>
+            {!collapsed && <span className="animate-fade-in text-sm">{item.label}</span>}
           </NavLink>
         ))}
       </nav>

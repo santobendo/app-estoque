@@ -36,7 +36,6 @@ const CadastroProduto = () => {
       setNome('');
       setUnidade(UNIDADES[0]);
       
-      // Auto dismiss success message after 3 seconds
       setTimeout(() => setSuccess(false), 3000);
     }
   };
@@ -45,28 +44,19 @@ const CadastroProduto = () => {
     <div className="page-container animate-fade-in">
       <div className="header-section">
         <h1>Novo Produto</h1>
-        <p style={{ color: 'var(--text-muted)' }}>Cadastre um novo item no catálogo de estoque.</p>
+        <p>Cadastre um novo item no catálogo de estoque.</p>
       </div>
 
-      <div style={{ maxWidth: '600px', margin: '0 auto', width: '100%' }}>
-        <div className="glass-panel" style={{ padding: '2rem' }}>
+      <div className="mx-auto w-full max-w-2xl">
+        <div className="glass-panel p-8">
           {success && (
-            <div style={{ 
-              backgroundColor: 'rgba(16, 185, 129, 0.1)', 
-              color: 'var(--success)', 
-              padding: '1rem', 
-              borderRadius: '8px', 
-              marginBottom: '1.5rem',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}>
+            <div className="mb-6 flex items-center gap-2 rounded-2xl bg-emerald-500/10 px-4 py-3 text-emerald-300">
               <CheckCircle size={20} />
               Produto cadastrado com sucesso!
             </div>
           )}
 
-          <form onSubmit={handleCadastrar} style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          <form onSubmit={handleCadastrar} className="flex flex-col gap-6">
             <div className="input-group">
               <label>Nome do Produto</label>
               <input 
@@ -74,7 +64,6 @@ const CadastroProduto = () => {
                 value={nome} 
                 onChange={(e) => setNome(e.target.value)}
                 placeholder="Ex: COPO DESCARTÁVEL..."
-                style={{ fontSize: '1.1rem', padding: '1rem' }}
                 required
               />
             </div>
@@ -84,25 +73,22 @@ const CadastroProduto = () => {
               <select 
                 value={unidade} 
                 onChange={(e) => setUnidade(e.target.value)}
-                style={{ fontSize: '1.1rem', padding: '1rem' }}
               >
                 {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
             </div>
 
-            <div style={{ display: 'flex', gap: '1rem', marginTop: '1rem' }}>
+            <div className="flex gap-4 pt-2">
               <button 
                 type="button" 
-                className="btn btn-danger" 
-                style={{ flex: 1, padding: '1rem' }}
+                className="btn btn-danger flex-1 py-3" 
                 onClick={() => navigate('/')}
               >
                 Cancelar
               </button>
               <button 
                 type="submit" 
-                className="btn btn-primary" 
-                style={{ flex: 2, padding: '1rem', fontSize: '1.1rem' }}
+                className="btn btn-primary flex-[2] py-3 text-base" 
                 disabled={loading}
               >
                 {loading ? 'Salvando...' : <><Plus size={20} /> Cadastrar Produto</>}
