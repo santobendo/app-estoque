@@ -1,12 +1,14 @@
 -- =============================================================
 -- SISTEMA DE CONTROLE DE ESTOQUE
 -- Supabase / PostgreSQL
+-- Schema normalizado (1FN, 2FN, 3FN)
 -- =============================================================
 
 -- -------------------------------------------------------------
 -- 1. PAPÉIS (ROLES)
 --    Tabela normalizada de cargos/funções dos usuários.
---    Substitui o antigo campo texto livre "cargo".
+--    Obs: "Admin" foi removido daqui — administração é controlada
+--    pelo flag is_admin em perfis (campo técnico de sistema).
 -- -------------------------------------------------------------
 create table papeis (
   id          serial      primary key,
@@ -15,7 +17,7 @@ create table papeis (
   criado_em   timestamptz not null default now()
 );
 
-comment on table  papeis      is 'Cargos/funções possíveis: Gestor, Almoxarife, Cozinheiro, etc.';
+comment on table  papeis      is 'Cargos/funções operacionais: Almoxarife, Cozinheiro, etc. Não inclui "Admin" — administração é controlada pelo flag is_admin em perfis.';
 comment on column papeis.nome is 'Nome único do papel — evita duplicatas e variações de escrita.';
 
 -- -------------------------------------------------------------
@@ -23,21 +25,28 @@ comment on column papeis.nome is 'Nome único do papel — evita duplicatas e va
 --    Extensão da tabela auth.users do Supabase.
 --    Criado automaticamente via trigger quando um usuário
 --    se cadastra. Guarda dados extras como nome, papel e flag admin.
+--    is_admin é flag técnico de sistema, independente do papel operacional.
 -- -------------------------------------------------------------
 create table perfis (
-  id            uuid        primary key references auth.users(id) on delete cascade,
+  id            uuid        primary key,
   nome          text        not null,
-  papel_id      int         references papeis(id) on delete set null,
+  papel_id      int,
   is_admin      boolean     not null default false,
   ativo         boolean     not null default true,
   criado_em     timestamptz not null default now(),
-  atualizado_em timestamptz not null default now()
+  atualizado_em timestamptz not null default now(),
+
+  constraint perfis_id_fk
+    foreign key (id) references auth.users(id) on delete cascade,
+
+  constraint perfis_papel_id_fk
+    foreign key (papel_id) references papeis(id) on delete set null
 );
 
 comment on table  perfis          is 'Dados extras do usuário; espelha auth.users via trigger.';
 comment on column perfis.id       is 'Mesmo UUID do auth.users — não é gerado aqui.';
-comment on column perfis.papel_id is 'FK para papeis — cargo/função do usuário.';
-comment on column perfis.is_admin is 'Se true, o usuário pode gerenciar perfis, papéis e dados mestres.';
+comment on column perfis.papel_id is 'FK para papeis — cargo/função operacional do usuário.';
+comment on column perfis.is_admin is 'Flag técnico de sistema. Se true, o usuário pode gerenciar perfis, papéis e dados mestres. Independente do papel operacional.';
 comment on column perfis.ativo    is 'Se false, o usuário não pode realizar operações no sistema.';
 
 -- Trigger: cria o perfil automaticamente ao criar usuário no Supabase Auth
@@ -58,47 +67,93 @@ after insert on auth.users
 for each row execute function fn_cria_perfil();
 
 -- -------------------------------------------------------------
--- 3. PRODUTOS
+-- 3. CATEGORIAS
+--    Tabela normalizada de categorias de produtos.
+-- -------------------------------------------------------------
+create table categorias (
+  id          serial      primary key,
+  nome        text        not null unique,
+  descricao   text
+);
+
+comment on table  categorias      is 'Categorias de produtos: Limpeza, Alimentação, Escritório, etc.';
+comment on column categorias.nome is 'Nome único da categoria — evita duplicatas e variações de escrita.';
+
+-- -------------------------------------------------------------
+-- 4. UNIDADES  [NOVO]
+--    Normaliza as unidades de medida que antes eram texto livre
+--    em apresentacoes.unidade. Garante consistência e evita
+--    variações como "L", "l", "litro", "Litro".
+-- -------------------------------------------------------------
+create table unidades (
+  id    serial primary key,
+  sigla text   not null unique,
+  nome  text
+);
+
+comment on table  unidades       is 'Unidades de medida: L, ml, kg, g, un, etc.';
+comment on column unidades.sigla is 'Sigla única — usada como referência em apresentacoes.';
+comment on column unidades.nome  is 'Nome completo da unidade: Litro, Mililitro, Quilograma, etc.';
+
+-- -------------------------------------------------------------
+-- 5. PRODUTOS
 --    Representa o item genérico (ex: "Água Sanitária")
 -- -------------------------------------------------------------
 create table produtos (
   id            serial      primary key,
   nome          text        not null,
-  categoria     text,
-  criado_por    uuid        references auth.users(id) on delete set null,
+  categoria_id  int,
+  criado_por    uuid,
   criado_em     timestamptz not null default now(),
-  atualizado_em timestamptz not null default now()
+  atualizado_em timestamptz not null default now(),
+
+  constraint produtos_categoria_id_fk
+    foreign key (categoria_id) references categorias(id) on delete set null,
+
+  constraint produtos_criado_por_fk
+    foreign key (criado_por) references auth.users(id) on delete set null
 );
 
-comment on table  produtos           is 'Produto genérico, independente de embalagem ou tamanho.';
-comment on column produtos.categoria is 'Agrupamento livre (ex: Limpeza, Alimentação, Escritório).';
-comment on column produtos.criado_por is 'Usuário que cadastrou o produto.';
+comment on table  produtos              is 'Produto genérico, independente de embalagem ou tamanho.';
+comment on column produtos.categoria_id is 'FK para categorias — agrupamento do produto.';
+comment on column produtos.criado_por   is 'Usuário que cadastrou o produto.';
 
 -- -------------------------------------------------------------
--- 4. APRESENTAÇÕES
---    Cada variação de embalagem/tamanho de um produto
---    Ex: Água Sanitária 2L, Água Sanitária 5L
+-- 6. APRESENTAÇÕES
+--    Cada variação de embalagem/tamanho de um produto.
+--    Ex: Água Sanitária 2L, Água Sanitária 5L.
+--    unidade_id substitui o antigo campo texto livre "unidade".
 -- -------------------------------------------------------------
 create table apresentacoes (
   id                  serial        primary key,
-  produto_id          int           not null references produtos(id) on delete cascade,
+  produto_id          int           not null,
   descricao           text          not null,
   quantidade_unitaria numeric(10,4) not null,
-  unidade             text          not null,
-  criado_por          uuid          references auth.users(id) on delete set null,
+  unidade_id          int           not null,
+  criado_por          uuid,
   criado_em           timestamptz   not null default now(),
   atualizado_em       timestamptz   not null default now(),
 
-  constraint apresentacoes_quantidade_positiva check (quantidade_unitaria > 0)
+  constraint apresentacoes_quantidade_positiva
+    check (quantidade_unitaria > 0),
+
+  constraint apresentacoes_produto_id_fk
+    foreign key (produto_id) references produtos(id) on delete cascade,
+
+  constraint apresentacoes_unidade_id_fk
+    foreign key (unidade_id) references unidades(id) on delete restrict,
+
+  constraint apresentacoes_criado_por_fk
+    foreign key (criado_por) references auth.users(id) on delete set null
 );
 
-comment on table  apresentacoes                     is 'Variações de embalagem/tamanho de um produto.';
-comment on column apresentacoes.quantidade_unitaria  is 'Quanto esta embalagem contém, na unidade base do produto.';
-comment on column apresentacoes.unidade              is 'Unidade base: L, ml, kg, g, un, etc.';
-comment on column apresentacoes.criado_por           is 'Usuário que cadastrou a apresentação.';
+comment on table  apresentacoes                    is 'Variações de embalagem/tamanho de um produto.';
+comment on column apresentacoes.quantidade_unitaria is 'Quanto esta embalagem contém, na unidade base do produto.';
+comment on column apresentacoes.unidade_id          is 'FK para unidades — substitui o antigo campo texto livre.';
+comment on column apresentacoes.criado_por          is 'Usuário que cadastrou a apresentação.';
 
 -- -------------------------------------------------------------
--- 5. LOCAIS
+-- 7. LOCAIS
 --    Locais físicos de armazenamento (almoxarifado, cozinha…)
 -- -------------------------------------------------------------
 create table locais (
@@ -106,58 +161,97 @@ create table locais (
   nome        text        not null unique,
   descricao   text,
   ativo       boolean     not null default true,
-  criado_por  uuid        references auth.users(id) on delete set null,
-  criado_em   timestamptz not null default now()
+  criado_por  uuid,
+  criado_em   timestamptz not null default now(),
+
+  constraint locais_criado_por_fk
+    foreign key (criado_por) references auth.users(id) on delete set null
 );
 
 comment on table locais is 'Locais físicos onde o estoque é mantido.';
 
 -- -------------------------------------------------------------
--- 6. ESTOQUES
+-- 8. ESTOQUES
 --    Combinação apresentação × local; guarda quantidade atual
 -- -------------------------------------------------------------
 create table estoques (
   id               serial        primary key,
-  apresentacao_id  int           not null references apresentacoes(id) on delete restrict,
-  local_id         int           not null references locais(id)        on delete restrict,
+  apresentacao_id  int           not null,
+  local_id         int           not null,
   quantidade_atual numeric(12,4) not null default 0,
   criado_em        timestamptz   not null default now(),
   atualizado_em    timestamptz   not null default now(),
 
-  constraint estoques_combinacao_unica        unique (apresentacao_id, local_id),
-  constraint estoques_quantidade_nao_negativa check  (quantidade_atual >= 0)
+  constraint estoques_combinacao_unica
+    unique (apresentacao_id, local_id),
+
+  constraint estoques_quantidade_nao_negativa
+    check (quantidade_atual >= 0),
+
+  constraint estoques_apresentacao_id_fk
+    foreign key (apresentacao_id) references apresentacoes(id) on delete restrict,
+
+  constraint estoques_local_id_fk
+    foreign key (local_id) references locais(id) on delete restrict
 );
 
 comment on table  estoques                  is 'Saldo atual de cada apresentação em cada local.';
 comment on column estoques.quantidade_atual is 'Cache atualizado via trigger a cada movimentação.';
 
 -- -------------------------------------------------------------
--- 7. MOVIMENTAÇÕES
---    Registro imutável de cada entrada ou saída
+-- 9. MOTIVOS DE MOVIMENTAÇÃO  [NOVO]
+--    Normaliza o campo "motivo" que antes era texto livre em
+--    movimentacoes. Garante consistência e permite que a lógica
+--    de negócio (ex: excluir descartes do consumo) seja baseada
+--    em IDs, não em strings comparadas manualmente.
+-- -------------------------------------------------------------
+create table motivos_movimentacao (
+  id        serial  primary key,
+  codigo    text    not null unique,
+  descricao text    not null
+);
+
+comment on table  motivos_movimentacao        is 'Motivos possíveis para movimentações de estoque.';
+comment on column motivos_movimentacao.codigo is 'Código curto único: uso, descarte, compra, ajuste, outro. Usado em lógicas de negócio.';
+
+-- -------------------------------------------------------------
+-- 10. MOVIMENTAÇÕES
+--     Registro imutável de cada entrada ou saída.
+--     motivo_id substitui o antigo campo texto livre "motivo".
 -- -------------------------------------------------------------
 create type tipo_movimentacao as enum ('entrada', 'saida');
 
 create table movimentacoes (
   id          serial            primary key,
-  estoque_id  int               not null references estoques(id)   on delete restrict,
-  criado_por  uuid              not null references auth.users(id) on delete restrict,
+  estoque_id  int               not null,
+  criado_por  uuid              not null,
   tipo        tipo_movimentacao not null,
   quantidade  numeric(12,4)     not null,
-  motivo      text,
+  motivo_id   int,
   data        timestamptz       not null default now(),
   criado_em   timestamptz       not null default now(),
 
-  constraint movimentacoes_quantidade_positiva check (quantidade > 0)
+  constraint movimentacoes_quantidade_positiva
+    check (quantidade > 0),
+
+  constraint movimentacoes_estoque_id_fk
+    foreign key (estoque_id) references estoques(id) on delete restrict,
+
+  constraint movimentacoes_criado_por_fk
+    foreign key (criado_por) references auth.users(id) on delete restrict,
+
+  constraint movimentacoes_motivo_id_fk
+    foreign key (motivo_id) references motivos_movimentacao(id) on delete set null
 );
 
-comment on table  movimentacoes           is 'Registro imutável de entradas e saídas de estoque.';
+comment on table  movimentacoes            is 'Registro imutável de entradas e saídas de estoque.';
 comment on column movimentacoes.criado_por is 'Usuário responsável pela movimentação — obrigatório.';
-comment on column movimentacoes.motivo    is 'Contexto: uso, descarte, compra, ajuste, etc.';
-comment on column movimentacoes.data      is 'Data/hora do evento real (pode diferir de criado_em).';
+comment on column movimentacoes.motivo_id  is 'FK para motivos_movimentacao — substitui o antigo campo texto livre.';
+comment on column movimentacoes.data       is 'Data/hora do evento real (pode diferir de criado_em).';
 
 -- -------------------------------------------------------------
--- 8. TRIGGER — atualiza quantidade_atual em estoques
---    automaticamente após cada movimentação inserida
+-- 11. TRIGGER — atualiza quantidade_atual em estoques
+--     automaticamente após cada movimentação inserida
 -- -------------------------------------------------------------
 create or replace function fn_atualiza_estoque()
 returns trigger language plpgsql as $$
@@ -182,15 +276,16 @@ after insert on movimentacoes
 for each row execute function fn_atualiza_estoque();
 
 -- -------------------------------------------------------------
--- 9. VIEW — consumo por produto nos últimos 30 dias
---    Base para a estimativa de compra do próximo mês
+-- 12. VIEW — consumo por produto nos últimos 30 dias
+--     Ajustada para usar motivo_id em vez de texto livre.
+--     O código 'descarte' é filtrado via join na tabela motivos.
 -- -------------------------------------------------------------
 create or replace view vw_consumo_30_dias as
 select
   p.id                                        as produto_id,
   p.nome                                      as produto,
-  p.categoria,
-  a.unidade,
+  c.nome                                      as categoria,
+  u.sigla                                     as unidade,
   l.id                                        as local_id,
   l.nome                                      as local,
   round(
@@ -200,17 +295,20 @@ select
   round(
     e.quantidade_atual * a.quantidade_unitaria
   , 4)                                        as estoque_atual_unidade_base
-from movimentacoes  m
-join estoques       e on e.id  = m.estoque_id
-join apresentacoes  a on a.id  = e.apresentacao_id
-join produtos       p on p.id  = a.produto_id
-join locais         l on l.id  = e.local_id
+from movimentacoes       m
+join estoques            e  on e.id  = m.estoque_id
+join apresentacoes       a  on a.id  = e.apresentacao_id
+join unidades            u  on u.id  = a.unidade_id
+join produtos            p  on p.id  = a.produto_id
+left join categorias     c  on c.id  = p.categoria_id
+join locais              l  on l.id  = e.local_id
+left join motivos_movimentacao mo on mo.id = m.motivo_id
 where m.tipo    = 'saida'
-  and m.motivo != 'descarte'
+  and (mo.codigo is null or mo.codigo != 'descarte')
   and m.data   >= now() - interval '30 days'
 group by
-  p.id, p.nome, p.categoria,
-  a.unidade,
+  p.id, p.nome, c.nome,
+  u.sigla,
   l.id, l.nome,
   e.quantidade_atual,
   a.quantidade_unitaria;
@@ -219,7 +317,7 @@ comment on view vw_consumo_30_dias is
   'Consumo real (excluindo descartes) dos últimos 30 dias por produto e local, com estoque atual.';
 
 -- -------------------------------------------------------------
--- 10. VIEW — sugestão de compra para o próximo mês
+-- 13. VIEW — sugestão de compra para o próximo mês
 -- -------------------------------------------------------------
 create or replace view vw_sugestao_compra as
 select
@@ -241,7 +339,7 @@ comment on view vw_sugestao_compra is
   'Sugestão de compra = consumo 30 dias − estoque atual (nunca negativo).';
 
 -- -------------------------------------------------------------
--- 11. VIEW — auditoria de movimentações com nome do usuário
+-- 14. VIEW — auditoria de movimentações com nome do usuário
 -- -------------------------------------------------------------
 create or replace view vw_auditoria_movimentacoes as
 select
@@ -250,40 +348,45 @@ select
   m.tipo,
   m.quantidade,
   a.quantidade_unitaria,
-  a.unidade,
-  m.motivo,
+  u.sigla                                  as unidade,
+  mo.codigo                                as motivo,
+  mo.descricao                             as motivo_descricao,
   p.nome                                   as produto,
   a.descricao                              as apresentacao,
   l.nome                                   as local,
   pf.nome                                  as usuario,
   pa.nome                                  as cargo_usuario,
   pf.is_admin                              as usuario_admin
-from movimentacoes  m
-join estoques       e  on e.id  = m.estoque_id
-join apresentacoes  a  on a.id  = e.apresentacao_id
-join produtos       p  on p.id  = a.produto_id
-join locais         l  on l.id  = e.local_id
-join perfis         pf on pf.id = m.criado_por
-left join papeis    pa on pa.id = pf.papel_id
+from movimentacoes            m
+join estoques                 e  on e.id  = m.estoque_id
+join apresentacoes            a  on a.id  = e.apresentacao_id
+join unidades                 u  on u.id  = a.unidade_id
+join produtos                 p  on p.id  = a.produto_id
+join locais                   l  on l.id  = e.local_id
+join perfis                   pf on pf.id = m.criado_por
+left join papeis              pa on pa.id = pf.papel_id
+left join motivos_movimentacao mo on mo.id = m.motivo_id
 order by m.data desc;
 
 comment on view vw_auditoria_movimentacoes is
   'Histórico completo de movimentações com produto, local e usuário responsável.';
 
 -- -------------------------------------------------------------
--- 12. ÍNDICES — performance em consultas comuns
+-- 15. ÍNDICES — performance em consultas comuns
 -- -------------------------------------------------------------
 create index idx_movimentacoes_estoque_data on movimentacoes(estoque_id, data desc);
 create index idx_movimentacoes_tipo_data    on movimentacoes(tipo, data desc);
 create index idx_movimentacoes_criado_por   on movimentacoes(criado_por);
+create index idx_movimentacoes_motivo_id    on movimentacoes(motivo_id);
 create index idx_estoques_apresentacao      on estoques(apresentacao_id);
 create index idx_estoques_local             on estoques(local_id);
 create index idx_apresentacoes_produto      on apresentacoes(produto_id);
+create index idx_apresentacoes_unidade      on apresentacoes(unidade_id);
 create index idx_perfis_papel               on perfis(papel_id);
+create index idx_produtos_categoria         on produtos(categoria_id);
 
 -- -------------------------------------------------------------
--- 13. FUNÇÕES AUXILIARES PARA RLS
---    Encapsulam consultas repetidas nas policies.
+-- 16. FUNÇÕES AUXILIARES PARA RLS
 -- -------------------------------------------------------------
 create or replace function fn_is_admin()
 returns boolean language sql security definer stable as $$
@@ -305,21 +408,31 @@ comment on function fn_is_admin() is 'Retorna true se o usuário logado é admin
 comment on function fn_is_ativo() is 'Retorna true se o usuário logado está ativo no sistema.';
 
 -- -------------------------------------------------------------
--- 14. ROW LEVEL SECURITY (RLS)
---    Garante que apenas usuários autenticados e ativos
---    acessam/modificam os dados. Admins gerenciam perfis e papéis.
+-- 17. ROW LEVEL SECURITY (RLS)
 -- -------------------------------------------------------------
-alter table papeis        enable row level security;
-alter table perfis        enable row level security;
-alter table produtos      enable row level security;
-alter table apresentacoes enable row level security;
-alter table locais        enable row level security;
-alter table estoques      enable row level security;
-alter table movimentacoes enable row level security;
+alter table papeis               enable row level security;
+alter table categorias           enable row level security;
+alter table unidades             enable row level security;
+alter table motivos_movimentacao enable row level security;
+alter table perfis               enable row level security;
+alter table produtos             enable row level security;
+alter table apresentacoes        enable row level security;
+alter table locais               enable row level security;
+alter table estoques             enable row level security;
+alter table movimentacoes        enable row level security;
 
 -- === LEITURA — todos autenticados ===
 create policy "autenticados podem ler papeis"
   on papeis for select to authenticated using (true);
+
+create policy "autenticados podem ler categorias"
+  on categorias for select to authenticated using (true);
+
+create policy "autenticados podem ler unidades"
+  on unidades for select to authenticated using (true);
+
+create policy "autenticados podem ler motivos_movimentacao"
+  on motivos_movimentacao for select to authenticated using (true);
 
 create policy "autenticados podem ler perfis"
   on perfis for select to authenticated using (true);
@@ -361,8 +474,6 @@ create policy "ativos podem inserir movimentacoes"
   with check (criado_por = auth.uid() and fn_is_ativo());
 
 -- === ATUALIZAÇÃO — perfil próprio ===
--- Usuário edita o próprio perfil (ex: nome).
--- Campos sensíveis (is_admin, ativo, papel_id) são protegidos pelo trigger.
 create policy "usuario edita proprio perfil"
   on perfis for update to authenticated
   using (id = auth.uid());
@@ -384,6 +495,26 @@ create policy "admin pode deletar papeis"
   on papeis for delete to authenticated
   using (fn_is_admin());
 
+create policy "admin pode inserir categorias"
+  on categorias for insert to authenticated
+  with check (fn_is_admin());
+
+create policy "admin pode atualizar categorias"
+  on categorias for update to authenticated
+  using (fn_is_admin());
+
+create policy "admin pode deletar categorias"
+  on categorias for delete to authenticated
+  using (fn_is_admin());
+
+create policy "admin pode gerenciar unidades"
+  on unidades for all to authenticated
+  using (fn_is_admin()) with check (fn_is_admin());
+
+create policy "admin pode gerenciar motivos_movimentacao"
+  on motivos_movimentacao for all to authenticated
+  using (fn_is_admin()) with check (fn_is_admin());
+
 create policy "admin pode atualizar produtos"
   on produtos for update to authenticated
   using (fn_is_admin());
@@ -397,9 +528,7 @@ create policy "admin pode atualizar locais"
   using (fn_is_admin());
 
 -- -------------------------------------------------------------
--- 15. TRIGGER — protege campos sensíveis do perfil
---    Impede que não-admins alterem is_admin, ativo ou papel_id.
---    Também atualiza automaticamente o campo atualizado_em.
+-- 18. TRIGGER — protege campos sensíveis do perfil
 -- -------------------------------------------------------------
 create or replace function fn_protege_perfil()
 returns trigger language plpgsql security definer as $$
@@ -428,27 +557,50 @@ comment on function fn_protege_perfil() is
   'Impede que não-admins alterem is_admin, ativo ou papel_id. Atualiza atualizado_em automaticamente.';
 
 -- -------------------------------------------------------------
--- 16. DADOS INICIAIS — exemplos para validar o schema
+-- 19. DADOS INICIAIS
 -- -------------------------------------------------------------
+
+-- Papéis operacionais (sem "Admin" — administração é via is_admin)
 insert into papeis (nome, descricao) values
-  ('Admin',      'Acesso total ao sistema, pode gerenciar usuários'),
   ('Almoxarife',  'Controla entrada e saída de materiais'),
   ('Cozinheiro',  'Registra consumo de itens na cozinha');
+
+insert into categorias (nome) values
+  ('Limpeza'),
+  ('Higiene'),
+  ('Alimentação'),
+  ('Escritório');
+
+-- Unidades de medida normalizadas
+insert into unidades (sigla, nome) values
+  ('L',   'Litro'),
+  ('ml',  'Mililitro'),
+  ('kg',  'Quilograma'),
+  ('g',   'Grama'),
+  ('un',  'Unidade');
+
+-- Motivos de movimentação normalizados
+insert into motivos_movimentacao (codigo, descricao) values
+  ('uso',      'Consumo regular'),
+  ('descarte', 'Item descartado por validade, dano ou inutilidade'),
+  ('compra',   'Entrada por compra ou recebimento'),
+  ('ajuste',   'Ajuste de inventário'),
+  ('outro',    'Outro motivo não categorizado');
 
 insert into locais (nome, descricao) values
   ('Almoxarifado', 'Depósito principal'),
   ('Cozinha',      'Estoque de uso diário da cozinha');
 
-insert into produtos (nome, categoria) values
-  ('Água Sanitária', 'Limpeza'),
-  ('Detergente',     'Limpeza'),
-  ('Papel Toalha',   'Higiene');
+insert into produtos (nome, categoria_id) values
+  ('Água Sanitária', (select id from categorias where nome = 'Limpeza')),
+  ('Detergente',     (select id from categorias where nome = 'Limpeza')),
+  ('Papel Toalha',   (select id from categorias where nome = 'Higiene'));
 
-insert into apresentacoes (produto_id, descricao, quantidade_unitaria, unidade) values
-  (1, 'Frasco 2L',    2,   'L'),
-  (1, 'Galão 5L',     5,   'L'),
-  (2, 'Frasco 500ml', 0.5, 'L'),
-  (3, 'Rolo',         1,   'un');
+insert into apresentacoes (produto_id, descricao, quantidade_unitaria, unidade_id) values
+  (1, 'Frasco 2L',    2,   (select id from unidades where sigla = 'L')),
+  (1, 'Galão 5L',     5,   (select id from unidades where sigla = 'L')),
+  (2, 'Frasco 500ml', 0.5, (select id from unidades where sigla = 'L')),
+  (3, 'Rolo',         1,   (select id from unidades where sigla = 'un'));
 
 insert into estoques (apresentacao_id, local_id) values
   (1, 1),  -- Água Sanitária 2L  / Almoxarifado

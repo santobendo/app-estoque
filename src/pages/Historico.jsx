@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Search, Trash2 } from 'lucide-react';
+import { Search } from 'lucide-react';
 
 const Historico = () => {
   const [historico, setHistorico] = useState([]);
@@ -9,18 +9,16 @@ const Historico = () => {
 
   const fetchHistorico = async () => {
     setLoading(true);
-    let query = supabase
-      .from('movimentacoes')
-      .select('id, data, tipo, quantidade, produto_id, produtos(nome)')
-      .order('data', { ascending: false });
 
-    // Since Supabase JS currently doesn't support ilike on related tables easily in a single query
-    // we'll fetch and filter client-side for simplicity on small datasets,
-    // or we can just fetch all and filter in JS if search is used.
-    
-    const { data, error } = await query;
+    // Usa a view vw_auditoria_movimentacoes que já faz todos os joins necessários
+    const { data, error } = await supabase
+      .from('vw_auditoria_movimentacoes')
+      .select('id, data, tipo, quantidade, quantidade_unitaria, unidade, motivo, motivo_descricao, produto, apresentacao, local, usuario, cargo_usuario')
+      .order('data', { ascending: false })
+      .limit(200);
+
     if (error) {
-      console.error('Erro ao buscar historico:', error);
+      console.error('Erro ao buscar histórico:', error);
       setHistorico([]);
     } else {
       setHistorico(data || []);
@@ -32,36 +30,15 @@ const Historico = () => {
     fetchHistorico();
   }, []);
 
-  const handleExcluir = async (movId, produtoId, tipo, quantidade) => {
-    if (!window.confirm(`Excluir esta movimentação? O estoque será revertido.`)) return;
-
-    // Fetch current product stock
-    const { data: pData } = await supabase.from('produtos').select('estoque').eq('id', produtoId).single();
-    
-    if (pData) {
-      let estoqueAtual = Number(pData.estoque);
-      let qtdMov = Number(quantidade);
-      let novoEstoque = estoqueAtual;
-
-      if (tipo === 'entrada') novoEstoque -= qtdMov;
-      else if (tipo === 'saida') novoEstoque += qtdMov;
-      else if (tipo === 'ajuste') novoEstoque -= qtdMov;
-
-      // Update stock
-      await supabase.from('produtos').update({ estoque: novoEstoque }).eq('id', produtoId);
-      
-      // Delete movement
-      await supabase.from('movimentacoes').delete().eq('id', movId);
-      
-      fetchHistorico();
-    }
-  };
-
-  // Client-side filtering
   const historicoFiltrado = historico.filter(h => {
     if (!busca) return true;
-    const nome = h.produtos?.nome || '';
-    return nome.toLowerCase().includes(busca.toLowerCase());
+    const termo = busca.toLowerCase();
+    return (
+      (h.produto || '').toLowerCase().includes(termo) ||
+      (h.local || '').toLowerCase().includes(termo) ||
+      (h.usuario || '').toLowerCase().includes(termo) ||
+      (h.motivo || '').toLowerCase().includes(termo)
+    );
   });
 
   const getBadgeType = (tipo) => {
@@ -76,6 +53,15 @@ const Historico = () => {
     return '⚙️ Ajuste';
   };
 
+  const getMotivoLabel = (motivo, descricao) => {
+    if (!motivo) return <span className="text-slate-500 italic text-xs">—</span>;
+    return (
+      <span title={descricao} className="text-xs bg-white/5 px-2 py-0.5 rounded capitalize">
+        {motivo}
+      </span>
+    );
+  };
+
   return (
     <div className="page-container animate-fade-in">
       <div className="header-section">
@@ -84,13 +70,13 @@ const Historico = () => {
       </div>
 
       <div className="glass-panel flex flex-col p-6 gap-4 h-full min-h-0">
-        
+
         <div className="table-header-actions justify-start">
           <div className="search-box w-96">
             <Search size={18} className="search-icon" />
-            <input 
-              type="text" 
-              placeholder="Buscar por nome do produto..." 
+            <input
+              type="text"
+              placeholder="Buscar por produto, local, usuário ou motivo..."
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
@@ -104,49 +90,48 @@ const Historico = () => {
                 <th>ID</th>
                 <th>Data / Hora</th>
                 <th>Produto</th>
+                <th>Apresentação</th>
+                <th>Local</th>
                 <th>Tipo</th>
                 <th>Quantidade</th>
-                <th>Ações</th>
+                <th>Unidade</th>
+                <th>Motivo</th>
+                <th>Usuário</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan="6" className="text-center py-8">Carregando...</td></tr>
+                <tr><td colSpan="10" className="text-center py-8">Carregando...</td></tr>
               ) : historicoFiltrado.length === 0 ? (
-                <tr><td colSpan="6" className="text-center py-8">Nenhuma movimentação encontrada.</td></tr>
+                <tr><td colSpan="10" className="text-center py-8">Nenhuma movimentação encontrada.</td></tr>
               ) : (
                 historicoFiltrado.map((h) => {
                   const dataObj = new Date(h.data);
                   const dataStr = dataObj.toLocaleDateString('pt-BR') + ' ' + dataObj.toLocaleTimeString('pt-BR');
-                  
+
                   return (
                     <tr key={h.id}>
                       <td className="text-slate-500">#{h.id}</td>
                       <td className="text-sm">{dataStr}</td>
-                      <td className="font-medium">{h.produtos?.nome || 'Desconhecido'}</td>
+                      <td className="font-medium">{h.produto || '—'}</td>
+                      <td className="text-sm text-slate-400">{h.apresentacao || '—'}</td>
+                      <td className="text-sm">{h.local || '—'}</td>
                       <td>
                         <span className={`badge ${getBadgeType(h.tipo)}`}>
                           {getIcon(h.tipo)}
                         </span>
                       </td>
-                      <td className="font-semibold">{Number(h.quantidade).toFixed(2)}</td>
-                      <td>
-                        <button 
-                          className="icon-btn danger" 
-                          onClick={() => handleExcluir(h.id, h.produto_id, h.tipo, h.quantidade)}
-                          title="Excluir Movimentação"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
+                      <td className="font-semibold">{Number(h.quantidade).toFixed(4)}</td>
+                      <td className="text-sm text-slate-400">{h.unidade || '—'}</td>
+                      <td>{getMotivoLabel(h.motivo, h.motivo_descricao)}</td>
+                      <td className="text-sm">{h.usuario || '—'}</td>
                     </tr>
-                  )
+                  );
                 })
               )}
             </tbody>
           </table>
         </div>
-
       </div>
     </div>
   );

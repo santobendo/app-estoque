@@ -2,23 +2,26 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Search, Edit2, Trash2, X, Save } from 'lucide-react';
 
-const UNIDADES = [
-  'Un (unidades)', 'Kg (quilos)', 'Gr (gramas)', 'Mt (metros)',
-  'Cm (centímetros)', 'Lt (litros)', 'Ml (mililitros)', 'Cx (caixa)',
-  'Pc (pacote)', 'Dz (dúzia)', 'Pl (palete)', 'Pr (par)',
-];
-
 const Produtos = () => {
   const [produtos, setProdutos] = useState([]);
+  const [categorias, setCategorias] = useState([]);
   const [busca, setBusca] = useState('');
   const [loading, setLoading] = useState(true);
   const [editingId, setEditingId] = useState(null);
   const [editNome, setEditNome] = useState('');
-  const [editUnidade, setEditUnidade] = useState('');
+  const [editCategoriaId, setEditCategoriaId] = useState('');
+
+  const fetchCategorias = async () => {
+    const { data } = await supabase.from('categorias').select('id, nome').order('nome');
+    if (data) setCategorias(data);
+  };
 
   const fetchProdutos = async () => {
     setLoading(true);
-    let query = supabase.from('produtos').select('*').order('nome');
+    let query = supabase
+      .from('produtos')
+      .select('id, nome, categoria_id, criado_em, categorias(nome)')
+      .order('nome');
 
     if (busca) {
       query = query.ilike('nome', `%${busca}%`);
@@ -34,15 +37,19 @@ const Produtos = () => {
   };
 
   useEffect(() => {
+    fetchCategorias();
+  }, []);
+
+  useEffect(() => {
     fetchProdutos();
   }, [busca]);
 
   const handleDelete = async (id, nomeProduto) => {
-    if (!window.confirm(`Excluir '${nomeProduto}' e todo seu histórico permanentemente?`)) return;
+    if (!window.confirm(`Excluir '${nomeProduto}' e todas as suas apresentações permanentemente?`)) return;
 
     const { error } = await supabase.from('produtos').delete().eq('id', id);
     if (error) {
-      alert('Erro ao excluir produto.');
+      alert('Erro ao excluir produto: ' + error.message);
     } else {
       fetchProdutos();
     }
@@ -51,7 +58,7 @@ const Produtos = () => {
   const startEdit = (p) => {
     setEditingId(p.id);
     setEditNome(p.nome);
-    setEditUnidade(p.unidade);
+    setEditCategoriaId(p.categoria_id ? String(p.categoria_id) : '');
   };
 
   const cancelEdit = () => {
@@ -63,11 +70,14 @@ const Produtos = () => {
 
     const { error } = await supabase
       .from('produtos')
-      .update({ nome: editNome.toUpperCase(), unidade: editUnidade })
+      .update({
+        nome: editNome.toUpperCase(),
+        categoria_id: editCategoriaId ? Number(editCategoriaId) : null,
+      })
       .eq('id', editingId);
 
     if (error) {
-      alert(error.message.includes('duplicate key') ? 'Já existe um produto com esse nome!' : 'Erro ao atualizar.');
+      alert(error.message.includes('duplicate') ? 'Já existe um produto com esse nome!' : 'Erro ao atualizar: ' + error.message);
     } else {
       setEditingId(null);
       fetchProdutos();
@@ -101,56 +111,47 @@ const Produtos = () => {
               <tr>
                 <th>ID</th>
                 <th>Nome</th>
-                <th>Unidade</th>
-                <th>Saldo Atual</th>
-                <th>Status</th>
+                <th>Categoria</th>
                 <th>Ações</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="text-center py-8">Carregando...</td>
+                  <td colSpan="4" className="text-center py-8">Carregando...</td>
                 </tr>
               ) : produtos.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="text-center py-8">Nenhum produto encontrado.</td>
+                  <td colSpan="4" className="text-center py-8">Nenhum produto encontrado.</td>
                 </tr>
               ) : (
                 produtos.map((p) => (
                   <tr key={p.id} className="even:bg-white/5">
                     <td className="font-medium">#{p.id}</td>
-                    <td className="font-semibold">{
-                      editingId === p.id ? (
+                    <td className="font-semibold">
+                      {editingId === p.id ? (
                         <input
                           type="text"
                           value={editNome}
                           onChange={(e) => setEditNome(e.target.value)}
                           className="w-full bg-slate-950/60 border border-white/10 px-3 py-2 rounded-2xl"
                         />
-                      ) : p.nome
-                    }</td>
+                      ) : p.nome}
+                    </td>
                     <td>
                       {editingId === p.id ? (
                         <select
-                          value={editUnidade}
-                          onChange={(e) => setEditUnidade(e.target.value)}
+                          value={editCategoriaId}
+                          onChange={(e) => setEditCategoriaId(e.target.value)}
                           className="w-full bg-slate-950/60 border border-white/10 px-3 py-2 rounded-2xl"
                         >
-                          {UNIDADES.map((u) => (
-                            <option key={u} value={u}>{u}</option>
+                          <option value="">Sem categoria</option>
+                          {categorias.map(c => (
+                            <option key={c.id} value={c.id}>{c.nome}</option>
                           ))}
                         </select>
                       ) : (
-                        p.unidade
-                      )}
-                    </td>
-                    <td>{Number(p.estoque).toFixed(2)}</td>
-                    <td>
-                      {p.estoque <= 5 ? (
-                        <span className="badge badge-danger">⚠️ BAIXO</span>
-                      ) : (
-                        <span className="badge badge-success">✅ OK</span>
+                        p.categorias?.nome || <span className="text-slate-500 text-sm italic">Sem categoria</span>
                       )}
                     </td>
                     <td>

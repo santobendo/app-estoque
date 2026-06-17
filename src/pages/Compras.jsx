@@ -3,99 +3,58 @@ import { supabase } from '../lib/supabaseClient';
 import { ShoppingCart, RefreshCw, Search } from 'lucide-react';
 
 const Compras = () => {
-  const [diasHistorico, setDiasHistorico] = useState(30);
   const [listaCompras, setListaCompras] = useState([]);
   const [busca, setBusca] = useState('');
   const [loading, setLoading] = useState(false);
 
   const calcularLista = async () => {
     setLoading(true);
-    
-    // 1. Fetch all products
-    const { data: produtosData } = await supabase.from('produtos').select('id, nome, unidade, estoque');
-    
-    // 2. Fetch movements (saidas) in the date range
-    const d = new Date();
-    d.setDate(d.getDate() - diasHistorico);
-    const dateLimit = d.toISOString();
 
-    const { data: movsData } = await supabase
-      .from('movimentacoes')
-      .select('produto_id, quantidade')
-      .eq('tipo', 'saida')
-      .gte('data', dateLimit);
+    // Usa a view vw_sugestao_compra que já calcula o consumo dos últimos 30 dias
+    const { data, error } = await supabase
+      .from('vw_sugestao_compra')
+      .select('produto_id, produto, categoria, local_id, local, unidade, consumo_30_dias, estoque_atual, quantidade_sugerida_compra')
+      .order('quantidade_sugerida_compra', { ascending: false });
 
-    if (produtosData && movsData) {
-      // Calculate total outputs per product
-      const totalSaidaPorProduto = {};
-      movsData.forEach(m => {
-        totalSaidaPorProduto[m.produto_id] = (totalSaidaPorProduto[m.produto_id] || 0) + Number(m.quantidade);
-      });
-
-      const lista = produtosData.map(p => {
-        const totalSaida = totalSaidaPorProduto[p.id] || 0;
-        const consumoDiario = diasHistorico > 0 ? totalSaida / diasHistorico : 0;
-        const consumo30Dias = consumoDiario * 30;
-        const metaEstoqueMensal = consumo30Dias * 1.10; // 10% safety margin
-        
-        let qtdComprar = metaEstoqueMensal - p.estoque;
-        if (qtdComprar < 0) qtdComprar = 0;
-
-        const durabilidade = consumoDiario > 0 ? p.estoque / consumoDiario : Infinity;
-
-        return {
-          ...p,
-          consumo30Dias,
-          sugestaoCompra: qtdComprar,
-          durabilidadeDias: durabilidade
-        };
-      });
-
-      // Sort by need (highest to buy first)
-      lista.sort((a, b) => b.sugestaoCompra - a.sugestaoCompra);
-      setListaCompras(lista);
+    if (error) {
+      console.error('Erro ao buscar sugestão de compras:', error);
+    } else {
+      setListaCompras(data || []);
     }
-    
+
     setLoading(false);
   };
 
   useEffect(() => {
     calcularLista();
-  }, []); // Run once on mount
+  }, []);
 
-  const listaFiltrada = listaCompras.filter(p => p.nome.toLowerCase().includes(busca.toLowerCase()));
+  const listaFiltrada = listaCompras.filter(item =>
+    item.produto?.toLowerCase().includes(busca.toLowerCase()) ||
+    item.local?.toLowerCase().includes(busca.toLowerCase()) ||
+    item.categoria?.toLowerCase().includes(busca.toLowerCase())
+  );
 
   return (
     <div className="page-container animate-fade-in">
       <div className="header-section">
         <h1>Gerador de Lista de Compras</h1>
-        <p>Análise de consumo e sugestão de compras automática.</p>
+        <p>Sugestão automática baseada no consumo real dos últimos 30 dias.</p>
       </div>
 
       <div className="glass-panel flex flex-col p-6 gap-6 h-full min-h-0">
-        
+
         <div className="compras-controls flex flex-wrap gap-4 items-end">
-          <div className="input-group mb-0">
-            <label>Dias de Histórico Analisados</label>
-            <input 
-              type="number" 
-              value={diasHistorico} 
-              onChange={(e) => setDiasHistorico(Number(e.target.value))}
-              min="1"
-              className="w-32"
-            />
-          </div>
-          
           <button className="btn btn-primary" onClick={calcularLista} disabled={loading}>
             <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
-            Calcular Sugestão
+            Atualizar Lista
           </button>
 
           <div className="ml-auto search-box">
             <Search size={18} className="search-icon" />
-            <input 
-              type="text" 
-              placeholder="Filtrar itens..." 
+            <input
+              type="text"
+              placeholder="Filtrar por produto, categoria ou local..."
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
             />
@@ -106,34 +65,51 @@ const Compras = () => {
           <table>
             <thead>
               <tr>
-                <th>Nome</th>
+                <th>Produto</th>
+                <th>Categoria</th>
+                <th>Local</th>
                 <th>Unidade</th>
+                <th>Consumo 30 dias</th>
                 <th>Estoque Atual</th>
-                <th>Gasto/Mês Estimado</th>
-                <th>Dias Restantes</th>
-                <th>QTD Comprar</th>
+                <th>Qtd. Sugerida</th>
               </tr>
             </thead>
             <tbody>
-              {listaFiltrada.map((item) => (
-                <tr key={item.id} className={item.sugestaoCompra > 0 ? 'bg-blue-500/5' : ''}>
-                  <td className="font-medium">{item.nome}</td>
-                  <td>{item.unidade.split(' ')[0]}</td>
-                  <td>{Number(item.estoque).toFixed(2)}</td>
-                  <td>{item.consumo30Dias.toFixed(2)}</td>
-                  <td>{item.durabilidadeDias === Infinity ? 'Infinito' : `${item.durabilidadeDias.toFixed(0)} dias`}</td>
-                  <td>
-                    {item.sugestaoCompra > 0 ? (
-                      <span className="badge badge-warning inline-flex gap-1 text-xs">
-                        <ShoppingCart size={14} />
-                        {Number(item.sugestaoCompra.toFixed(2)).toString()}
-                      </span>
-                    ) : (
-                      <span className="text-slate-500">0</span>
-                    )}
+              {loading ? (
+                <tr>
+                  <td colSpan="7" className="text-center py-8">Calculando...</td>
+                </tr>
+              ) : listaFiltrada.length === 0 ? (
+                <tr>
+                  <td colSpan="7" className="text-center py-8 text-slate-400">
+                    Nenhum dado disponível. Registre movimentações de saída para gerar sugestões.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                listaFiltrada.map((item, idx) => (
+                  <tr
+                    key={`${item.produto_id}-${item.local_id}-${idx}`}
+                    className={Number(item.quantidade_sugerida_compra) > 0 ? 'bg-blue-500/5' : ''}
+                  >
+                    <td className="font-medium">{item.produto}</td>
+                    <td className="text-sm text-slate-400">{item.categoria || '—'}</td>
+                    <td className="text-sm">{item.local}</td>
+                    <td className="text-sm text-slate-400">{item.unidade}</td>
+                    <td>{Number(item.consumo_30_dias).toFixed(4)}</td>
+                    <td>{Number(item.estoque_atual).toFixed(4)}</td>
+                    <td>
+                      {Number(item.quantidade_sugerida_compra) > 0 ? (
+                        <span className="badge badge-warning inline-flex gap-1 text-xs">
+                          <ShoppingCart size={14} />
+                          {Number(item.quantidade_sugerida_compra).toFixed(4)}
+                        </span>
+                      ) : (
+                        <span className="text-slate-500">OK</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
