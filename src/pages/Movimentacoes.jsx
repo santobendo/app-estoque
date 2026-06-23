@@ -1,254 +1,451 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Search, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw,
+} from 'lucide-react';
 
-const Movimentacoes = ({ tipo }) => {
-  const isEntrada = tipo === 'entrada';
-  const Icon = isEntrada ? ArrowDownToLine : ArrowUpFromLine;
-  const titulo = isEntrada ? 'Registrar Entrada' : 'Registrar Saída';
+/* ─── helpers ─── */
+function Label({ children, required }) {
+  return (
+    <label className="text-[11px] font-bold text-app-text-label uppercase tracking-widest">
+      {children}{required && <span className="text-rose-500 ml-0.5">*</span>}
+    </label>
+  );
+}
 
-  const [estoques, setEstoques] = useState([]);
-  const [motivos, setMotivos] = useState([]);
+function SectionHeader({ number, title, subtitle }) {
+  return (
+    <div className="px-6 py-4 border-b border-app-border-inner flex items-center gap-3">
+      <span className="w-6 h-6 rounded-full bg-app-text text-white flex items-center justify-center text-[11px] font-bold shrink-0">
+        {number}
+      </span>
+      <span className="text-[13px] font-bold text-app-text uppercase tracking-wide">{title}</span>
+      {subtitle && <span className="text-[11px] text-app-text-secondary">{subtitle}</span>}
+    </div>
+  );
+}
+
+function Spinner() {
+  return (
+    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  );
+}
+
+/* ─── componente de busca de produto ─── */
+function ProdutoBusca({ onSelect }) {
   const [busca, setBusca] = useState('');
-  const [estoqueSelecionado, setEstoqueSelecionado] = useState(null);
-  const [quantidade, setQuantidade] = useState('');
-  const [motivoId, setMotivoId] = useState('');
-  const [dataMov, setDataMov] = useState(new Date().toISOString().split('T')[0]);
-  const [loading, setLoading] = useState(false);
-  const [user, setUser] = useState(null);
-
-  const fetchEstoques = async () => {
-    let query = supabase
-      .from('estoques')
-      .select(`
-        id,
-        quantidade_atual,
-        apresentacoes (
-          id,
-          descricao,
-          quantidade_unitaria,
-          unidades ( sigla ),
-          produtos ( id, nome )
-        ),
-        locais ( id, nome )
-      `)
-      .order('id');
-
-    const { data } = await query;
-    if (data) {
-      // Filtra client-side pelo busca
-      setEstoques(data);
-    }
-  };
-
-  const fetchMotivos = async () => {
-    const { data } = await supabase.from('motivos_movimentacao').select('id, codigo, descricao').order('id');
-    if (data) {
-      setMotivos(data);
-      // Pré-seleciona motivo padrão baseado no tipo
-      const defaultCodigo = isEntrada ? 'compra' : 'uso';
-      const def = data.find(m => m.codigo === defaultCodigo);
-      if (def) setMotivoId(String(def.id));
-    }
-  };
+  const [resultados, setResultados] = useState([]);
+  const [buscando, setBuscando] = useState(false);
+  const [aberto, setAberto] = useState(false);
+  const ref = useRef(null);
 
   useEffect(() => {
-    const getUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      setUser(user);
+    const handler = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setAberto(false);
     };
-    getUser();
-    fetchEstoques();
-    fetchMotivos();
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const estoquesFiltrados = estoques.filter(e => {
-    if (!busca) return true;
-    const nome = e.apresentacoes?.produtos?.nome || '';
-    const apresentacao = e.apresentacoes?.descricao || '';
-    const local = e.locais?.nome || '';
-    const termo = busca.toLowerCase();
-    return nome.toLowerCase().includes(termo) || apresentacao.toLowerCase().includes(termo) || local.toLowerCase().includes(termo);
+  useEffect(() => {
+    if (!busca.trim()) { setResultados([]); return; }
+    const timer = setTimeout(async () => {
+      setBuscando(true);
+      const { data } = await supabase
+        .from('produtos')
+        .select('id, nome, categorias(nome)')
+        .ilike('nome', `%${busca}%`)
+        .order('nome')
+        .limit(10);
+      setResultados(data ?? []);
+      setAberto(true);
+      setBuscando(false);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [busca]);
+
+  const selecionar = (produto) => {
+    setBusca(produto.nome);
+    setAberto(false);
+    setResultados([]);
+    onSelect(produto);
+  };
+
+  return (
+    <div className="relative" ref={ref}>
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-label" size={15} />
+        <input
+          type="text"
+          value={busca}
+          onChange={(e) => { setBusca(e.target.value); onSelect(null); }}
+          placeholder="Buscar produto pelo nome..."
+          className="input-base w-full pl-9"
+        />
+        {buscando && (
+          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-app-text-label">
+            <Spinner />
+          </span>
+        )}
+      </div>
+      {aberto && resultados.length > 0 && (
+        <ul className="absolute z-50 w-full mt-1 bg-white border border-app-border rounded-xl shadow-lg overflow-hidden">
+          {resultados.map(p => (
+            <li
+              key={p.id}
+              onClick={() => selecionar(p)}
+              className="px-4 py-2.5 cursor-pointer hover:bg-app-bg flex items-center justify-between"
+            >
+              <span className="text-[13px] font-semibold text-app-text">{p.nome}</span>
+              {p.categorias?.nome && (
+                <span className="text-[11px] text-app-text-secondary">{p.categorias.nome}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      {aberto && resultados.length === 0 && busca.trim() && !buscando && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-app-border rounded-xl shadow-lg px-4 py-3 text-[13px] text-app-text-secondary">
+          Nenhum produto encontrado.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════
+   Página principal
+═══════════════════════════════════════════ */
+export default function Movimentacoes() {
+  const { user } = useAuth();
+
+  /* ── dados mestres ── */
+  const [motivos, setMotivos]       = useState([]);
+  const [apresentacoes, setApresentacoes] = useState([]);
+  const [estoques, setEstoques]     = useState([]); // estoques da apresentação selecionada
+
+  /* ── seleções ── */
+  const [produto, setProduto]           = useState(null);
+  const [apresentacaoId, setApresentacaoId] = useState('');
+  const [estoqueId, setEstoqueId]       = useState('');
+  const [tipo, setTipo]                 = useState('saida');
+  const [motivoId, setMotivoId]         = useState('');
+  const [quantidade, setQuantidade]     = useState('');
+  const [data, setData]                 = useState(() => new Date().toISOString().slice(0, 16));
+
+  /* ── estado ── */
+  const [loading, setLoading]   = useState(false);
+  const [success, setSuccess]   = useState(false);
+  const [erros, setErros]       = useState({});
+  const [estoqueAtual, setEstoqueAtual] = useState(null);
+
+  /* ─ Carrega motivos ─ */
+  useEffect(() => {
+    supabase.from('motivos_movimentacao').select('id, codigo, descricao').order('descricao')
+      .then(({ data }) => {
+        if (data) {
+          setMotivos(data);
+          setMotivoId(String(data[0]?.id ?? ''));
+        }
+      });
+  }, []);
+
+  /* ─ Carrega apresentações quando produto muda ─ */
+  useEffect(() => {
+    setApresentacaoId('');
+    setEstoques([]);
+    setEstoqueId('');
+    setEstoqueAtual(null);
+    if (!produto) { setApresentacoes([]); return; }
+
+    supabase
+      .from('apresentacoes')
+      .select('id, descricao, quantidade_unitaria, unidades(sigla)')
+      .eq('produto_id', produto.id)
+      .order('descricao')
+      .then(({ data }) => {
+        setApresentacoes(data ?? []);
+        if (data?.length) setApresentacaoId(String(data[0].id));
+      });
+  }, [produto]);
+
+  /* ─ Carrega estoques quando apresentação muda ─ */
+  useEffect(() => {
+    setEstoqueId('');
+    setEstoqueAtual(null);
+    if (!apresentacaoId) { setEstoques([]); return; }
+
+    supabase
+      .from('estoques')
+      .select('id, quantidade_atual, locais(id, nome)')
+      .eq('apresentacao_id', Number(apresentacaoId))
+      .then(({ data }) => {
+        setEstoques(data ?? []);
+        if (data?.length) {
+          setEstoqueId(String(data[0].id));
+          setEstoqueAtual(Number(data[0].quantidade_atual));
+        }
+      });
+  }, [apresentacaoId]);
+
+  /* ─ Atualiza estoque atual quando local muda ─ */
+  useEffect(() => {
+    const est = estoques.find(e => String(e.id) === estoqueId);
+    setEstoqueAtual(est ? Number(est.quantidade_atual) : null);
+  }, [estoqueId, estoques]);
+
+  /* ─ Filtra motivos conforme tipo ─ */
+  const motivosFiltrados = motivos.filter(m => {
+    if (tipo === 'entrada') return ['compra', 'ajuste', 'outro'].includes(m.codigo);
+    return ['uso', 'descarte', 'ajuste', 'outro'].includes(m.codigo);
   });
 
-  const handleConfirmar = async (e) => {
+  useEffect(() => {
+    if (motivosFiltrados.length) setMotivoId(String(motivosFiltrados[0].id));
+  }, [tipo]);
+
+  /* ─ Validação ─ */
+  const validate = () => {
+    const e = {};
+    if (!produto)           e.produto      = 'Selecione um produto.';
+    if (!apresentacaoId)    e.apresentacao = 'Selecione uma apresentação.';
+    if (!estoqueId)         e.estoque      = 'Selecione o local.';
+    if (!quantidade || Number(quantidade) <= 0)
+                            e.quantidade   = 'Informe uma quantidade maior que zero.';
+    if (tipo === 'saida' && estoqueAtual !== null && Number(quantidade) > estoqueAtual)
+                            e.quantidade   = `Estoque insuficiente. Disponível: ${estoqueAtual}`;
+    setErros(e);
+    return Object.keys(e).length === 0;
+  };
+
+  /* ─ Submissão ─ */
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!estoqueSelecionado || !quantidade || Number(quantidade) <= 0) {
-      alert('Selecione um item e informe uma quantidade válida.');
-      return;
-    }
-    if (!user) {
-      alert('Usuário não autenticado.');
-      return;
-    }
-
-    const qtd = Number(quantidade);
-
-    // Verificação de saldo suficiente para saída
-    if (!isEntrada && qtd > Number(estoqueSelecionado.quantidade_atual)) {
-      alert(`Estoque insuficiente! Saldo atual: ${Number(estoqueSelecionado.quantidade_atual).toFixed(4)}`);
-      return;
-    }
-
+    if (!validate()) return;
     setLoading(true);
 
     const { error } = await supabase.from('movimentacoes').insert([{
-      estoque_id: estoqueSelecionado.id,
+      estoque_id: Number(estoqueId),
       criado_por: user.id,
       tipo,
-      quantidade: qtd,
+      quantidade: Number(quantidade),
       motivo_id: motivoId ? Number(motivoId) : null,
-      data: new Date(dataMov).toISOString(),
+      data: new Date(data).toISOString(),
     }]);
+
+    setLoading(false);
 
     if (error) {
       alert('Erro ao registrar movimentação: ' + error.message);
     } else {
-      alert('Movimentação registrada com sucesso!');
-      setQuantidade('');
-      setEstoqueSelecionado(null);
-      setBusca('');
-      fetchEstoques(); // atualiza saldos
+      setSuccess(true);
+      resetForm();
     }
-
-    setLoading(false);
   };
 
-  const getNomeProduto = (e) => {
-    const nome = e.apresentacoes?.produtos?.nome || 'Desconhecido';
-    const apresentacao = e.apresentacoes?.descricao || '';
-    const local = e.locais?.nome || '';
-    return `${nome} — ${apresentacao} (${local})`;
+  const resetForm = () => {
+    setProduto(null);
+    setApresentacaoId('');
+    setEstoqueId('');
+    setQuantidade('');
+    setData(new Date().toISOString().slice(0, 16));
+    setErros({});
   };
+
+  const apSelecionada = apresentacoes.find(a => String(a.id) === apresentacaoId);
 
   return (
-    <div className="flex flex-col h-full gap-6 animate-fade-in">
-      <div className="space-y-2">
-        <h1 className="text-3xl font-bold">{titulo}</h1>
-        <p className="text-slate-400">Registre e acompanhe todas as {isEntrada ? 'entradas' : 'saídas'} de estoque.</p>
-      </div>
+    <div className="flex flex-col gap-5">
 
-      <div className="grid gap-6 lg:grid-cols-[1.2fr_1fr] min-h-0 flex-1">
-        {/* Painel do formulário */}
-        <div className="glass-panel p-6 flex flex-col gap-4">
-          <h2 className={`${isEntrada ? 'text-emerald-300' : 'text-rose-300'} flex items-center gap-2 text-lg font-semibold`}>
-            <Icon size={20} /> Detalhes da Movimentação
-          </h2>
+      <header className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl mb-0.5">Movimentações</h1>
+          <p className="text-[13px] text-app-text-secondary">Registre entradas e saídas de estoque.</p>
+        </div>
+      </header>
 
-          <form onSubmit={handleConfirmar} className="space-y-4 flex-1 flex flex-col">
-            <div className="input-group">
-              <label>Item Selecionado</label>
-              <input
-                type="text"
-                value={estoqueSelecionado ? getNomeProduto(estoqueSelecionado) : 'Nenhum selecionado'}
-                readOnly
-                className={estoqueSelecionado ? 'selected-input' : ''}
-              />
+      {success && (
+        <div className="card px-5 py-4 flex items-center justify-between gap-4 border-l-4 border-emerald-500">
+          <div className="flex items-center gap-3">
+            <CheckCircle size={20} className="text-emerald-500 shrink-0" />
+            <span className="text-[13px] font-semibold text-app-text">
+              Movimentação registrada com sucesso!
+            </span>
+          </div>
+          <button
+            className="btn btn-secondary flex items-center gap-1.5 text-[12px]"
+            onClick={() => setSuccess(false)}
+          >
+            <RotateCcw size={13} /> Nova movimentação
+          </button>
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
+
+        {/* ── Tipo ── */}
+        <div className="card">
+          <SectionHeader number="1" title="Tipo de Movimentação" />
+          <div className="p-6 grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={() => setTipo('saida')}
+              className={`flex items-center gap-3 p-4 rounded-xl border-[1.5px] transition-all cursor-pointer ${
+                tipo === 'saida'
+                  ? 'border-rose-400 bg-rose-50 text-rose-700'
+                  : 'border-app-border hover:border-rose-200 text-app-text-secondary'
+              }`}
+            >
+              <ArrowUpCircle size={22} />
+              <div className="text-left">
+                <p className="text-[13px] font-bold">Saída</p>
+                <p className="text-[11px] opacity-75">Consumo, descarte ou retirada</p>
+              </div>
+            </button>
+            <button
+              type="button"
+              onClick={() => setTipo('entrada')}
+              className={`flex items-center gap-3 p-4 rounded-xl border-[1.5px] transition-all cursor-pointer ${
+                tipo === 'entrada'
+                  ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                  : 'border-app-border hover:border-emerald-200 text-app-text-secondary'
+              }`}
+            >
+              <ArrowDownCircle size={22} />
+              <div className="text-left">
+                <p className="text-[13px] font-bold">Entrada</p>
+                <p className="text-[11px] opacity-75">Compra, recebimento ou ajuste</p>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* ── Produto ── */}
+        <div className="card">
+          <SectionHeader number="2" title="Produto" />
+          <div className="p-6 grid grid-cols-2 gap-4">
+            <div className="col-span-2 flex flex-col gap-1.5">
+              <Label required>Produto</Label>
+              <ProdutoBusca onSelect={setProduto} />
+              {erros.produto && <span className="text-rose-500 text-[11px]">{erros.produto}</span>}
             </div>
 
-            {estoqueSelecionado && (
-              <div className="text-xs text-slate-400 -mt-2 px-1">
-                Saldo atual: <span className="font-bold text-slate-200">{Number(estoqueSelecionado.quantidade_atual).toFixed(4)}</span>
-                {' '}{estoqueSelecionado.apresentacoes?.unidades?.sigla}
+            {/* Apresentação */}
+            {apresentacoes.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <Label required>Apresentação / Embalagem</Label>
+                <select
+                  value={apresentacaoId}
+                  onChange={e => setApresentacaoId(e.target.value)}
+                  className={`input-base ${erros.apresentacao ? 'border-rose-400' : ''}`}
+                >
+                  {apresentacoes.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.descricao} ({a.quantidade_unitaria} {a.unidades?.sigla})
+                    </option>
+                  ))}
+                </select>
+                {erros.apresentacao && <span className="text-rose-500 text-[11px]">{erros.apresentacao}</span>}
               </div>
             )}
 
-            <div className="input-group">
-              <label>Quantidade</label>
+            {/* Local */}
+            {estoques.length > 0 && (
+              <div className="flex flex-col gap-1.5">
+                <Label required>Local de Estoque</Label>
+                <select
+                  value={estoqueId}
+                  onChange={e => setEstoqueId(e.target.value)}
+                  className={`input-base ${erros.estoque ? 'border-rose-400' : ''}`}
+                >
+                  {estoques.map(e => (
+                    <option key={e.id} value={e.id}>
+                      {e.locais?.nome} — saldo: {Number(e.quantidade_atual)}
+                    </option>
+                  ))}
+                </select>
+                {erros.estoque && <span className="text-rose-500 text-[11px]">{erros.estoque}</span>}
+              </div>
+            )}
+
+            {/* Estoque atual badge */}
+            {estoqueAtual !== null && apSelecionada && (
+              <div className="col-span-2 flex items-center gap-2">
+                <span className="text-[11px] text-app-text-label">Saldo atual:</span>
+                <span className={`text-[13px] font-bold ${estoqueAtual === 0 ? 'text-rose-500' : 'text-app-text'}`}>
+                  {estoqueAtual} {apSelecionada.unidades?.sigla}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── Detalhes ── */}
+        <div className="card">
+          <SectionHeader number="3" title="Detalhes da Movimentação" />
+          <div className="p-6 grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-1.5">
+              <Label required>Quantidade</Label>
               <input
                 type="number"
                 step="0.0001"
                 min="0.0001"
                 value={quantidade}
-                onChange={(e) => setQuantidade(e.target.value)}
-                placeholder="Ex: 10"
-                required
+                onChange={e => setQuantidade(e.target.value)}
+                placeholder="Ex: 3"
+                className={`input-base ${erros.quantidade ? 'border-rose-400' : ''}`}
               />
+              {erros.quantidade && <span className="text-rose-500 text-[11px]">{erros.quantidade}</span>}
             </div>
 
-            <div className="input-group">
-              <label>Motivo</label>
-              <select value={motivoId} onChange={(e) => setMotivoId(e.target.value)}>
-                <option value="">Sem motivo</option>
-                {motivos.map(m => (
+            <div className="flex flex-col gap-1.5">
+              <Label required>Motivo</Label>
+              <select
+                value={motivoId}
+                onChange={e => setMotivoId(e.target.value)}
+                className="input-base"
+              >
+                {motivosFiltrados.map(m => (
                   <option key={m.id} value={m.id}>{m.descricao}</option>
                 ))}
               </select>
             </div>
 
-            <div className="input-group">
-              <label>Data</label>
+            <div className="flex flex-col gap-1.5">
+              <Label>Data / Hora</Label>
               <input
-                type="date"
-                value={dataMov}
-                onChange={(e) => setDataMov(e.target.value)}
-                required
-              />
-            </div>
-
-            <button
-              type="submit"
-              className={`btn ${isEntrada ? 'btn-primary' : 'btn-danger'} w-full mt-auto py-3`}
-              disabled={loading}
-            >
-              <Icon size={18} /> Confirmar {isEntrada ? 'Entrada' : 'Saída'}
-            </button>
-          </form>
-        </div>
-
-        {/* Painel de seleção */}
-        <div className="glass-panel p-6 flex flex-col gap-4 min-h-0">
-          <div className="flex justify-end">
-            <div className="search-box">
-              <Search size={18} className="search-icon" />
-              <input
-                type="text"
-                className="pl-11"
-                placeholder="Buscar por produto ou local..."
-                value={busca}
-                onChange={(e) => setBusca(e.target.value)}
+                type="datetime-local"
+                value={data}
+                onChange={e => setData(e.target.value)}
+                className="input-base"
               />
             </div>
           </div>
-
-          <div className="table-container flex-1 min-h-0">
-            <table className="min-w-full">
-              <thead>
-                <tr>
-                  <th>Produto / Apresentação</th>
-                  <th>Local</th>
-                  <th>Saldo</th>
-                  <th>Ação</th>
-                </tr>
-              </thead>
-              <tbody>
-                {estoquesFiltrados.map((e) => (
-                  <tr key={e.id} className={estoqueSelecionado?.id === e.id ? 'row-selected' : 'even:bg-white/5'}>
-                    <td>
-                      <div className="font-semibold">{e.apresentacoes?.produtos?.nome}</div>
-                      <div className="text-xs text-slate-400">{e.apresentacoes?.descricao}</div>
-                    </td>
-                    <td className="text-sm">{e.locais?.nome}</td>
-                    <td>
-                      <span className={Number(e.quantidade_atual) === 0 ? 'text-rose-400 font-bold' : ''}>
-                        {Number(e.quantidade_atual).toFixed(2)}
-                      </span>
-                      {' '}<span className="text-xs text-slate-500">{e.apresentacoes?.unidades?.sigla}</span>
-                    </td>
-                    <td>
-                      <button className="select-btn" onClick={() => setEstoqueSelecionado(e)}>
-                        Selecionar
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </div>
-      </div>
+
+        {/* ── Ações ── */}
+        <div className="flex items-center justify-end gap-3">
+          <button type="button" className="btn btn-secondary px-5 py-2.5" onClick={resetForm}>
+            Limpar
+          </button>
+          <button
+            type="submit"
+            disabled={loading || !produto}
+            className={`btn btn-primary flex items-center gap-2 px-6 py-2.5 text-[13px] ${
+              tipo === 'entrada' ? '' : 'bg-rose-600 hover:opacity-90'
+            }`}
+          >
+            {loading ? <Spinner /> : tipo === 'entrada'
+              ? <ArrowDownCircle size={15} />
+              : <ArrowUpCircle size={15} />}
+            {loading ? 'Salvando...' : tipo === 'entrada' ? 'Registrar Entrada' : 'Registrar Saída'}
+          </button>
+        </div>
+      </form>
     </div>
   );
-};
-
-export default Movimentacoes;
+}
