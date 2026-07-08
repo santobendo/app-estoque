@@ -29,6 +29,7 @@ export default function ProdutoDetalhe() {
   const [editAp, setEditAp]           = useState(null);  // { id, descricao, quantidade_unitaria, unidade_id }
   const [salvando, setSalvando]       = useState(false);
   const [confirmacao, setConfirmacao] = useState(null);  // { mensagem, onConfirm }
+  const [editMin, setEditMin]         = useState(null);  // { estoqueId, valor }
 
   const fetch = useCallback(async () => {
     setLoading(true);
@@ -41,7 +42,7 @@ export default function ProdutoDetalhe() {
             apresentacoes (
               id, descricao, quantidade_unitaria, unidade_id,
               unidades (sigla),
-              estoques (id, quantidade_atual, local_id, locais (nome))
+              estoques (id, quantidade_atual, estoque_minimo, local_id, locais (nome))
             )
           `)
           .eq('id', id)
@@ -149,6 +150,19 @@ export default function ProdutoDetalhe() {
         fetch();
       },
     });
+  };
+
+  const salvarMinimo = async () => {
+    if (!editMin) return;
+    const valor = Math.max(Number(editMin.valor) || 0, 0);
+    setErro(null);
+    const { error } = await supabase
+      .from('estoques')
+      .update({ estoque_minimo: valor })
+      .eq('id', editMin.estoqueId);
+    if (error) { setErro(traduzErro(error)); return; }
+    setEditMin(null);
+    fetch();
   };
 
   /* ─── Vínculos com locais (estoques) ─── */
@@ -458,6 +472,36 @@ export default function ProdutoDetalhe() {
                         <MapPin size={12} className="text-app-text-label" />
                         <span className="font-semibold">{e.locais?.nome}</span>
                         <span className="text-app-text-secondary">· {Number(e.quantidade_atual)} emb.</span>
+                        {editMin?.estoqueId === e.id ? (
+                          <span className="inline-flex items-center gap-1">
+                            <span className="text-app-text-label">· mín</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="1"
+                              autoFocus
+                              value={editMin.valor}
+                              onChange={ev => setEditMin(p => ({ ...p, valor: ev.target.value }))}
+                              onKeyDown={ev => {
+                                if (ev.key === 'Enter') salvarMinimo();
+                                if (ev.key === 'Escape') setEditMin(null);
+                              }}
+                              className="w-14 input-base py-0.5 px-1.5 text-[11px] text-center"
+                            />
+                            <button onClick={salvarMinimo} className="text-emerald-600 hover:text-emerald-700">
+                              <Check size={12} />
+                            </button>
+                          </span>
+                        ) : (
+                          <button
+                            disabled={!isAdmin}
+                            onClick={() => setEditMin({ estoqueId: e.id, valor: Number(e.estoque_minimo) })}
+                            title={isAdmin ? 'Estoque mínimo — clique para editar' : 'Estoque mínimo'}
+                            className={`text-app-text-secondary ${isAdmin ? 'hover:text-app-text underline decoration-dotted underline-offset-2' : ''}`}
+                          >
+                            · mín {Number(e.estoque_minimo)}
+                          </button>
+                        )}
                         {isAdmin && (
                           <button
                             onClick={() => desvincularLocal(ap, e)}

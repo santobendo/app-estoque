@@ -64,9 +64,13 @@ export default function Historico() {
     if (filtroInicio) query = query.gte('data', new Date(filtroInicio).toISOString());
     if (filtroFim)    query = query.lte('data', new Date(filtroFim + 'T23:59:59').toISOString());
     if (busca.trim()) {
-      query = query.or(
-        `produto.ilike.%${busca}%,usuario.ilike.%${busca}%`
-      );
+      // vírgulas/parênteses quebram a sintaxe do .or() do PostgREST
+      const termo = busca.replace(/[,()]/g, ' ').trim();
+      if (termo) {
+        query = query.or(
+          `produto.ilike.%${termo}%,usuario.ilike.%${termo}%`
+        );
+      }
     }
 
     const { data, count, error } = await query;

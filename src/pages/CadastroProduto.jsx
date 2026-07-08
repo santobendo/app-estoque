@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Plus, Trash2, CheckCircle, ChevronLeft, Package, MapPin } from 'lucide-react';
+import { Plus, Trash2, CheckCircle, ChevronLeft, Package, MapPin, AlertCircle, X } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useLocal } from '../contexts/LocalContext';
+import { traduzErro } from '../components/TabelaCrud';
 
 /* ─────────────────────────────────────────────
    Componente de rótulo de campo
@@ -80,6 +81,7 @@ export default function CadastroProduto() {
   const [loading, setLoading]   = useState(false);
   const [success, setSuccess]   = useState(false);
   const [erros, setErros]       = useState({});
+  const [erroSubmit, setErroSubmit] = useState(null);
 
   /* ────────────────────────────────────────── */
   useEffect(() => {
@@ -176,69 +178,40 @@ export default function CadastroProduto() {
     return Object.keys(novosErros).length === 0;
   };
 
-  /* ── Submissão ── */
+  /* ── Submissão ──
+     Tudo numa única transação via RPC: se qualquer etapa falhar,
+     nada é gravado. O saldo inicial vira movimentação de ajuste. */
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setErroSubmit(null);
     if (!validate()) return;
 
     setLoading(true);
 
-    /* 1 — Inserir produto */
-    const { data: prodData, error: errProd } = await supabase
-      .from('produtos')
-      .insert([{
-        nome: nomeProduto.trim().toUpperCase(),
-        categoria_id: categoriaId ? Number(categoriaId) : null,
-      }])
-      .select('id')
-      .single();
+    const { error } = await supabase.rpc('fn_cria_produto_completo', {
+      p_nome: nomeProduto.trim(),
+      p_categoria_id: categoriaId ? Number(categoriaId) : null,
+      p_apresentacoes: apresentacoes.map(ap => ({
+        descricao: ap.descricao.trim(),
+        quantidade_unitaria: Number(ap.quantidade_unitaria),
+        unidade_id: Number(ap.unidade_id),
+        locais: ap.locais.map(loc => ({
+          local_id: loc.local_id,
+          quantidade_inicial: Math.max(Number(loc.quantidade_inicial) || 0, 0),
+        })),
+      })),
+    });
 
-    if (errProd) {
-      setLoading(false);
-      alert(
-        errProd.message.toLowerCase().includes('duplicate')
+    setLoading(false);
+
+    if (error) {
+      setErroSubmit(
+        error.code === '23505'
           ? 'Já existe um produto com esse nome.'
-          : 'Erro ao cadastrar produto: ' + errProd.message
+          : traduzErro(error)
       );
       return;
     }
-
-    /* 2 — Inserir apresentações e estoques */
-    for (const ap of apresentacoes) {
-      const { data: apData, error: errAp } = await supabase
-        .from('apresentacoes')
-        .insert([{
-          produto_id: prodData.id,
-          descricao: ap.descricao.trim() || nomeProduto.trim().toUpperCase(),
-          quantidade_unitaria: Number(ap.quantidade_unitaria),
-          unidade_id: Number(ap.unidade_id),
-        }])
-        .select('id')
-        .single();
-
-      if (errAp) {
-        setLoading(false);
-        alert('Erro ao cadastrar apresentação: ' + errAp.message);
-        return;
-      }
-
-      /* 3 — Criar estoques para cada local selecionado */
-      for (const loc of ap.locais) {
-        const { error: errEst } = await supabase
-          .from('estoques')
-          .insert([{
-            apresentacao_id: apData.id,
-            local_id: loc.local_id,
-            quantidade_atual: Math.max(Number(loc.quantidade_inicial) || 0, 0),
-          }]);
-
-        if (errEst) {
-          console.warn('Erro ao criar estoque:', errEst.message);
-        }
-      }
-    }
-
-    setLoading(false);
     setSuccess(true);
   };
 
@@ -281,6 +254,14 @@ export default function CadastroProduto() {
           </p>
         </div>
       </header>
+
+      {erroSubmit && (
+        <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-2.5 text-[13px]">
+          <AlertCircle size={15} className="shrink-0" />
+          <span className="flex-1">{erroSubmit}</span>
+          <button onClick={() => setErroSubmit(null)} className="p-1 hover:text-rose-900"><X size={14} /></button>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
 

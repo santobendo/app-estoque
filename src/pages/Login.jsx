@@ -4,6 +4,16 @@ import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 import { Box, Lock, Mail } from 'lucide-react';
 
+function traduzErroLogin(error) {
+  const msg = error.message?.toLowerCase() ?? '';
+  if (msg.includes('invalid login credentials')) return 'E-mail ou senha incorretos.';
+  if (msg.includes('email not confirmed'))       return 'E-mail ainda não confirmado. Verifique sua caixa de entrada.';
+  if (msg.includes('user is banned') || msg.includes('banned')) return 'Esta conta está bloqueada. Fale com o administrador.';
+  if (msg.includes('rate limit') || msg.includes('too many'))   return 'Muitas tentativas. Aguarde alguns minutos e tente de novo.';
+  if (msg.includes('failed to fetch') || msg.includes('network')) return 'Falha de conexão. Verifique sua internet.';
+  return error.message;
+}
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -30,7 +40,7 @@ export default function Login() {
     });
 
     if (error) {
-      setErrorMsg(error.message);
+      setErrorMsg(traduzErroLogin(error));
       setLoading(false);
     }
   };

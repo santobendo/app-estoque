@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
-import { Shield, ShieldOff, UserCheck, UserX } from 'lucide-react';
-import TabelaCrud, { ConfirmDialog } from '../components/TabelaCrud';
+import { Shield, ShieldOff, UserCheck, UserX, AlertCircle, X } from 'lucide-react';
+import TabelaCrud, { ConfirmDialog, traduzErro } from '../components/TabelaCrud';
 
 /* ─── Aba Usuários ─── */
 function AbaUsuarios({ papeis }) {
@@ -10,6 +10,7 @@ function AbaUsuarios({ papeis }) {
   const [rows, setRows]       = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirmacao, setConfirmacao] = useState(null);
+  const [erro, setErro]       = useState(null);
 
   const fetch = useCallback(async () => {
     setLoading(true);
@@ -29,8 +30,9 @@ function AbaUsuarios({ papeis }) {
     setConfirmacao({
       mensagem: `Deseja realmente ${novoValor ? 'ativar' : 'desativar'} o usuário "${row.nome}"? ${!novoValor ? 'Ele perderá acesso ao sistema.' : ''}`,
       onConfirm: async () => {
-        await supabase.from('perfis').update({ ativo: novoValor }).eq('id', row.id);
+        const { error } = await supabase.from('perfis').update({ ativo: novoValor }).eq('id', row.id);
         setConfirmacao(null);
+        if (error) { setErro(traduzErro(error)); return; }
         fetch();
       }
     });
@@ -42,20 +44,31 @@ function AbaUsuarios({ papeis }) {
     setConfirmacao({
       mensagem: `Deseja realmente ${novoValor ? 'conceder' : 'remover'} privilégios de administrador para "${row.nome}"?`,
       onConfirm: async () => {
-        await supabase.from('perfis').update({ is_admin: novoValor }).eq('id', row.id);
+        const { error } = await supabase.from('perfis').update({ is_admin: novoValor }).eq('id', row.id);
         setConfirmacao(null);
+        if (error) { setErro(traduzErro(error)); return; }
         fetch();
       }
     });
   };
 
   const alterarPapel = async (id, papelId) => {
-    await supabase.from('perfis').update({ papel_id: papelId ? Number(papelId) : null }).eq('id', id);
+    setErro(null);
+    const { error } = await supabase.from('perfis').update({ papel_id: papelId ? Number(papelId) : null }).eq('id', id);
+    if (error) { setErro(traduzErro(error)); return; }
     fetch();
   };
 
   return (
-    <div className="table-wrapper">
+    <div className="flex flex-col gap-3">
+      {erro && (
+        <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-2.5 text-[13px]">
+          <AlertCircle size={15} className="shrink-0" />
+          <span className="flex-1">{erro}</span>
+          <button onClick={() => setErro(null)} className="p-1 hover:text-rose-900"><X size={14} /></button>
+        </div>
+      )}
+      <div className="table-wrapper">
       {confirmacao && (
         <ConfirmDialog
           mensagem={confirmacao.mensagem}
@@ -125,6 +138,7 @@ function AbaUsuarios({ papeis }) {
           })}
         </tbody>
       </table>
+      </div>
     </div>
   );
 }

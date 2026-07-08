@@ -116,19 +116,20 @@ export default function Compras() {
                 <th>Unidade</th>
                 <th className="text-right">Consumo 30d</th>
                 <th className="text-right">Estoque Atual</th>
+                <th className="text-right">Mínimo</th>
                 <th className="text-right">Sugestão de Compra</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="6" className="text-center py-10 text-app-text-secondary text-[13px]">
+                  <td colSpan="7" className="text-center py-10 text-app-text-secondary text-[13px]">
                     Carregando...
                   </td>
                 </tr>
               ) : filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan="6" className="text-center py-10 text-app-text-secondary text-[13px]">
+                  <td colSpan="7" className="text-center py-10 text-app-text-secondary text-[13px]">
                     Nenhum item encontrado neste local.
                   </td>
                 </tr>
@@ -162,6 +163,11 @@ export default function Compras() {
                         </span>
                       </td>
                       <td className="text-right">
+                        <span className="text-[12px] text-app-text-secondary">
+                          {Number(r.estoque_minimo ?? 0).toFixed(2)}
+                        </span>
+                      </td>
+                      <td className="text-right">
                         {sugestao > 0 ? (
                           <span className="inline-flex items-center gap-1.5 badge badge-amber px-2.5 py-1 rounded-md text-[12px] font-bold">
                             <AlertCircle size={12} />
@@ -181,7 +187,7 @@ export default function Compras() {
       </div>
 
       <p className="text-[11px] text-app-text-label text-center">
-        Sugestão = consumo médio dos últimos 30 dias − estoque atual. Descartes são excluídos do cálculo.
+        Sugestão = consumo dos últimos 30 dias + estoque mínimo − estoque atual. Descartes são excluídos do cálculo.
       </p>
     </div>
   );

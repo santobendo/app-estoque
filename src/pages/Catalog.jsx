@@ -26,6 +26,7 @@ function Catalog() {
           .select(`
             id,
             quantidade_atual,
+            estoque_minimo,
             apresentacoes (
               id,
               descricao,
@@ -51,10 +52,11 @@ function Catalog() {
         if (error) throw error;
 
         const formattedData = estoquesData.map(item => {
-          const qtd = Number(item.quantidade_atual);
+          const qtd    = Number(item.quantidade_atual);
+          const minimo = Number(item.estoque_minimo);
           let status = 'emerald';
           if (qtd === 0) status = 'rose';
-          else if (qtd <= 5) status = 'amber';
+          else if (minimo > 0 && qtd <= minimo) status = 'amber';
 
           return {
             id: item.id,

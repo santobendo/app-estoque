@@ -101,7 +101,7 @@ comment on column unidades.nome  is 'Nome completo da unidade: Litro, Mililitro,
 -- -------------------------------------------------------------
 create table produtos (
   id            serial      primary key,
-  nome          text        not null,
+  nome          text        not null unique,
   categoria_id  int,
   criado_por    uuid,
   criado_em     timestamptz not null default now(),
@@ -179,6 +179,7 @@ create table estoques (
   apresentacao_id  int           not null,
   local_id         int           not null,
   quantidade_atual numeric(12,4) not null default 0,
+  estoque_minimo   numeric(12,4) not null default 0,
   criado_em        timestamptz   not null default now(),
   atualizado_em    timestamptz   not null default now(),
 
@@ -187,6 +188,9 @@ create table estoques (
 
   constraint estoques_quantidade_nao_negativa
     check (quantidade_atual >= 0),
+
+  constraint estoques_minimo_nao_negativo
+    check (estoque_minimo >= 0),
 
   constraint estoques_apresentacao_id_fk
     foreign key (apresentacao_id) references apresentacoes(id) on delete restrict,
@@ -197,6 +201,7 @@ create table estoques (
 
 comment on table  estoques                  is 'Saldo atual de cada apresentação em cada local.';
 comment on column estoques.quantidade_atual is 'Cache atualizado via trigger a cada movimentação.';
+comment on column estoques.estoque_minimo   is 'Quantidade mínima desejada (em embalagens). Usada no alerta de estoque baixo e na sugestão de compra.';
 
 -- -------------------------------------------------------------
 -- 9. MOTIVOS DE MOVIMENTAÇÃO  [NOVO]
@@ -253,8 +258,11 @@ comment on column movimentacoes.data       is 'Data/hora do evento real (pode di
 -- 11. TRIGGER — atualiza quantidade_atual em estoques
 --     automaticamente após cada movimentação inserida
 -- -------------------------------------------------------------
+-- security definer: o update em estoques precisa ignorar o RLS
+-- (não há policy de UPDATE em estoques para usuários comuns — de
+-- propósito, o saldo só muda via movimentação).
 create or replace function fn_atualiza_estoque()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql security definer as $$
 begin
   if NEW.tipo = 'entrada' then
     update estoques
@@ -280,41 +288,62 @@ for each row execute function fn_atualiza_estoque();
 --     Ajustada para usar motivo_id em vez de texto livre.
 --     O código 'descarte' é filtrado via join na tabela motivos.
 -- -------------------------------------------------------------
+-- Consolida por produto × local × unidade: apresentações diferentes do
+-- mesmo produto (ex: pacote 500g e pacote 1kg) somam na unidade base.
+-- Parte de "estoques" (não de movimentações) para que produtos sem
+-- consumo recente também apareçam, com consumo = 0.
+-- Obs: apresentações do mesmo produto com unidades diferentes (ex: g e kg)
+-- geram linhas separadas — cadastre sempre na mesma unidade base.
 create or replace view vw_consumo_30_dias as
+with consumo as (
+  select
+    e.local_id,
+    a.produto_id,
+    a.unidade_id,
+    sum(m.quantidade * a.quantidade_unitaria) as consumo_base
+  from movimentacoes m
+  join estoques      e  on e.id = m.estoque_id
+  join apresentacoes a  on a.id = e.apresentacao_id
+  left join motivos_movimentacao mo on mo.id = m.motivo_id
+  where m.tipo  = 'saida'
+    and (mo.codigo is null or mo.codigo != 'descarte')
+    and m.data >= now() - interval '30 days'
+  group by e.local_id, a.produto_id, a.unidade_id
+),
+saldo as (
+  select
+    e.local_id,
+    a.produto_id,
+    a.unidade_id,
+    sum(e.quantidade_atual)                         as embalagens,
+    sum(e.quantidade_atual * a.quantidade_unitaria) as estoque_base,
+    sum(e.estoque_minimo   * a.quantidade_unitaria) as minimo_base
+  from estoques      e
+  join apresentacoes a on a.id = e.apresentacao_id
+  group by e.local_id, a.produto_id, a.unidade_id
+)
 select
-  p.id                                        as produto_id,
-  p.nome                                      as produto,
-  c.nome                                      as categoria,
-  u.sigla                                     as unidade,
-  l.id                                        as local_id,
-  l.nome                                      as local,
-  round(
-    sum(m.quantidade * a.quantidade_unitaria)
-  , 4)                                        as consumo_total_unidade_base,
-  e.quantidade_atual                          as estoque_atual_unidades,
-  round(
-    e.quantidade_atual * a.quantidade_unitaria
-  , 4)                                        as estoque_atual_unidade_base
-from movimentacoes       m
-join estoques            e  on e.id  = m.estoque_id
-join apresentacoes       a  on a.id  = e.apresentacao_id
-join unidades            u  on u.id  = a.unidade_id
-join produtos            p  on p.id  = a.produto_id
-left join categorias     c  on c.id  = p.categoria_id
-join locais              l  on l.id  = e.local_id
-left join motivos_movimentacao mo on mo.id = m.motivo_id
-where m.tipo    = 'saida'
-  and (mo.codigo is null or mo.codigo != 'descarte')
-  and m.data   >= now() - interval '30 days'
-group by
-  p.id, p.nome, c.nome,
-  u.sigla,
-  l.id, l.nome,
-  e.quantidade_atual,
-  a.quantidade_unitaria;
+  p.id                                   as produto_id,
+  p.nome                                 as produto,
+  c.nome                                 as categoria,
+  u.sigla                                as unidade,
+  l.id                                   as local_id,
+  l.nome                                 as local,
+  round(coalesce(co.consumo_base, 0), 4) as consumo_total_unidade_base,
+  s.embalagens                           as estoque_atual_unidades,
+  round(s.estoque_base, 4)               as estoque_atual_unidade_base,
+  round(s.minimo_base, 4)                as estoque_minimo_unidade_base
+from saldo s
+join produtos        p on p.id = s.produto_id
+left join categorias c on c.id = p.categoria_id
+join locais          l on l.id = s.local_id
+join unidades        u on u.id = s.unidade_id
+left join consumo   co on co.produto_id = s.produto_id
+                      and co.local_id   = s.local_id
+                      and co.unidade_id = s.unidade_id;
 
 comment on view vw_consumo_30_dias is
-  'Consumo real (excluindo descartes) dos últimos 30 dias por produto e local, com estoque atual.';
+  'Consumo real (excluindo descartes) dos últimos 30 dias, consolidado por produto, local e unidade base. Inclui produtos sem consumo recente.';
 
 -- -------------------------------------------------------------
 -- 13. VIEW — sugestão de compra para o próximo mês
@@ -330,13 +359,16 @@ select
   consumo_total_unidade_base               as consumo_30_dias,
   estoque_atual_unidade_base               as estoque_atual,
   greatest(
-    consumo_total_unidade_base - estoque_atual_unidade_base,
+    consumo_total_unidade_base
+      + estoque_minimo_unidade_base
+      - estoque_atual_unidade_base,
     0
-  )                                        as quantidade_sugerida_compra
+  )                                        as quantidade_sugerida_compra,
+  estoque_minimo_unidade_base              as estoque_minimo
 from vw_consumo_30_dias;
 
 comment on view vw_sugestao_compra is
-  'Sugestão de compra = consumo 30 dias − estoque atual (nunca negativo).';
+  'Sugestão de compra = consumo 30 dias + estoque mínimo − estoque atual (nunca negativo).';
 
 -- -------------------------------------------------------------
 -- 14. VIEW — auditoria de movimentações com nome do usuário
@@ -532,6 +564,13 @@ create policy "admin pode deletar estoques"
   on estoques for delete to authenticated
   using (fn_is_admin());
 
+-- Permite ao admin ajustar o estoque_minimo pela interface.
+-- (quantidade_atual continua sendo alterada apenas pelo trigger de
+-- movimentações; o app não expõe edição direta desse campo)
+create policy "admin pode atualizar estoques"
+  on estoques for update to authenticated
+  using (fn_is_admin());
+
 create policy "admin pode atualizar locais"
   on locais for update to authenticated
   using (fn_is_admin());
@@ -573,6 +612,77 @@ for each row execute function fn_protege_perfil();
 
 comment on function fn_protege_perfil() is
   'Impede que não-admins alterem is_admin, ativo ou papel_id. Atualiza atualizado_em automaticamente.';
+
+-- -------------------------------------------------------------
+-- 18.1 FUNÇÃO RPC — cadastro transacional de produto
+--      Cria produto + apresentações + estoques + movimentações de
+--      saldo inicial numa única transação: se qualquer etapa
+--      falhar, nada é gravado (evita produtos pela metade).
+--      SECURITY INVOKER: o RLS do usuário logado se aplica
+--      normalmente a cada insert.
+--
+--      p_apresentacoes (jsonb):
+--      [{ "descricao": "Galão 5L", "quantidade_unitaria": 5,
+--         "unidade_id": 1,
+--         "locais": [{ "local_id": 1, "quantidade_inicial": 10 }] }]
+-- -------------------------------------------------------------
+create or replace function fn_cria_produto_completo(
+  p_nome          text,
+  p_categoria_id  int,
+  p_apresentacoes jsonb
+)
+returns int
+language plpgsql
+security invoker
+as $$
+declare
+  v_produto_id    int;
+  v_ap            jsonb;
+  v_ap_id         int;
+  v_loc           jsonb;
+  v_estoque_id    int;
+  v_qtd           numeric;
+  v_motivo_ajuste int;
+begin
+  select id into v_motivo_ajuste
+    from motivos_movimentacao where codigo = 'ajuste';
+
+  insert into produtos (nome, categoria_id, criado_por)
+  values (upper(trim(p_nome)), p_categoria_id, auth.uid())
+  returning id into v_produto_id;
+
+  for v_ap in select * from jsonb_array_elements(coalesce(p_apresentacoes, '[]'::jsonb)) loop
+    insert into apresentacoes (produto_id, descricao, quantidade_unitaria, unidade_id, criado_por)
+    values (
+      v_produto_id,
+      coalesce(nullif(trim(v_ap->>'descricao'), ''), upper(trim(p_nome))),
+      (v_ap->>'quantidade_unitaria')::numeric,
+      (v_ap->>'unidade_id')::int,
+      auth.uid()
+    )
+    returning id into v_ap_id;
+
+    for v_loc in select * from jsonb_array_elements(coalesce(v_ap->'locais', '[]'::jsonb)) loop
+      insert into estoques (apresentacao_id, local_id)
+      values (v_ap_id, (v_loc->>'local_id')::int)
+      returning id into v_estoque_id;
+
+      -- Saldo inicial entra como movimentação de ajuste,
+      -- preservando o histórico (o trigger atualiza o saldo).
+      v_qtd := coalesce((v_loc->>'quantidade_inicial')::numeric, 0);
+      if v_qtd > 0 then
+        insert into movimentacoes (estoque_id, criado_por, tipo, quantidade, motivo_id)
+        values (v_estoque_id, auth.uid(), 'entrada', v_qtd, v_motivo_ajuste);
+      end if;
+    end loop;
+  end loop;
+
+  return v_produto_id;
+end;
+$$;
+
+comment on function fn_cria_produto_completo(text, int, jsonb) is
+  'Cria produto, apresentações, estoques e saldo inicial em uma transação única. Usada pela tela de cadastro de produto.';
 
 -- -------------------------------------------------------------
 -- 19. DADOS INICIAIS

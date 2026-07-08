@@ -32,16 +32,18 @@ export function traduzErro(error) {
     case '23505': return 'Já existe um registro com esse nome/sigla.';
     case '23503': return 'Não é possível excluir: este registro está sendo usado em outro cadastro.';
     case '23502': return 'Preencha os campos obrigatórios.';
+    case '23514': return 'Operação bloqueada: o saldo em estoque não pode ficar negativo.';
     case '42501': return 'Você não tem permissão para esta operação.';
     default:      return error.message;
   }
 }
 
 /* ─── CRUD genérico para tabelas de cadastro ───
-   colunas:  [{ field, label, placeholder? }] — a 1ª coluna define a ordenação
-   comAtivo: adiciona coluna Status com toggle ativo/inativo
-   readOnly: esconde botões de criação/edição/exclusão               */
-export default function TabelaCrud({ tabela, colunas, labelNovo, comAtivo = false, readOnly = false }) {
+   colunas:      [{ field, label, placeholder? }] — a 1ª coluna define a ordenação
+   comAtivo:     adiciona coluna Status com toggle ativo/inativo
+   readOnly:     esconde botões de criação/edição/exclusão
+   onDataChange: chamado após qualquer gravação bem-sucedida         */
+export default function TabelaCrud({ tabela, colunas, labelNovo, comAtivo = false, readOnly = false, onDataChange }) {
   const [rows, setRows]           = useState([]);
   const [loading, setLoading]     = useState(true);
   const [novo, setNovo]           = useState(null);
@@ -75,6 +77,7 @@ export default function TabelaCrud({ tabela, colunas, labelNovo, comAtivo = fals
     if (error) { setErro(traduzErro(error)); return; }
     setNovo(null);
     fetch();
+    onDataChange?.();
   };
 
   const salvarEdicao = async () => {
@@ -86,6 +89,7 @@ export default function TabelaCrud({ tabela, colunas, labelNovo, comAtivo = fals
     if (error) { setErro(traduzErro(error)); return; }
     setEditando(null);
     fetch();
+    onDataChange?.();
   };
 
   const confirmarDelete = async () => {
@@ -100,6 +104,7 @@ export default function TabelaCrud({ tabela, colunas, labelNovo, comAtivo = fals
       return;
     }
     fetch();
+    onDataChange?.();
   };
 
   const toggleAtivo = async (row) => {
@@ -107,6 +112,7 @@ export default function TabelaCrud({ tabela, colunas, labelNovo, comAtivo = fals
     const { error } = await supabase.from(tabela).update({ ativo: !row.ativo }).eq('id', row.id);
     if (error) { setErro(traduzErro(error)); return; }
     fetch();
+    onDataChange?.();
   };
 
   const emptyNovo = () => Object.fromEntries(colunas.map(c => [c.field, '']));

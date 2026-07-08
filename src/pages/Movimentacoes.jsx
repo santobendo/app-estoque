@@ -4,8 +4,9 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocal } from '../contexts/LocalContext';
 import {
-  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw, AlertCircle,
+  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw, AlertCircle, X,
 } from 'lucide-react';
+import { traduzErro } from '../components/TabelaCrud';
 
 /* ─── helpers ─── */
 function Label({ children, required }) {
@@ -144,6 +145,7 @@ export default function Movimentacoes() {
   const [loading, setLoading]   = useState(false);
   const [success, setSuccess]   = useState(false);
   const [erros, setErros]       = useState({});
+  const [erroSubmit, setErroSubmit] = useState(null);
   const [estoqueAtual, setEstoqueAtual] = useState(null);
 
   /* ─ Carrega motivos ─ */
@@ -229,6 +231,7 @@ export default function Movimentacoes() {
   /* ─ Submissão ─ */
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setErroSubmit(null);
     if (!validate()) return;
     setLoading(true);
 
@@ -244,7 +247,7 @@ export default function Movimentacoes() {
     setLoading(false);
 
     if (error) {
-      alert('Erro ao registrar movimentação: ' + error.message);
+      setErroSubmit(traduzErro(error));
     } else {
       setSuccess(true);
       resetForm();
@@ -290,6 +293,14 @@ export default function Movimentacoes() {
           >
             <RotateCcw size={13} /> Nova movimentação
           </button>
+        </div>
+      )}
+
+      {erroSubmit && (
+        <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-2.5 text-[13px]">
+          <AlertCircle size={15} className="shrink-0" />
+          <span className="flex-1">{erroSubmit}</span>
+          <button onClick={() => setErroSubmit(null)} className="p-1 hover:text-rose-900"><X size={14} /></button>
         </div>
       )}
 
