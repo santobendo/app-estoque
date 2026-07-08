@@ -2,15 +2,24 @@ import React, { useState, useEffect } from 'react';
 import { Search, Plus, Filter, Package } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useNavigate } from 'react-router-dom';
+import { useLocal } from '../contexts/LocalContext';
 
 function Catalog() {
   const navigate = useNavigate();
+  const { localAtual, loadingLocal } = useLocal();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
 
   useEffect(() => {
     async function fetchData() {
+      if (loadingLocal) return;
+      if (!localAtual) {
+        setData([]);
+        setLoading(false);
+        return;
+      }
+      setLoading(true);
       try {
         const { data: estoquesData, error } = await supabase
           .from('estoques')
@@ -36,7 +45,8 @@ function Catalog() {
               id,
               nome
             )
-          `);
+          `)
+          .eq('local_id', localAtual.id);
 
         if (error) throw error;
 
@@ -48,6 +58,7 @@ function Catalog() {
 
           return {
             id: item.id,
+            produtoId: item.apresentacoes?.produtos?.id ?? null,
             produto: item.apresentacoes?.produtos?.nome || 'Desconhecido',
             categoria: item.apresentacoes?.produtos?.categorias?.nome || 'Sem categoria',
             apresentacao: item.apresentacoes?.descricao || '',
@@ -67,7 +78,7 @@ function Catalog() {
     }
 
     fetchData();
-  }, []);
+  }, [localAtual, loadingLocal]);
 
   const dadosFiltrados = data.filter(item => {
     if (!busca) return true;
@@ -118,7 +129,11 @@ function Catalog() {
       <header className="flex justify-between items-end">
         <div>
           <h1 className="text-2xl mb-1">Catálogo de Estoque</h1>
-          <p className="text-[13px] text-app-text-secondary">Gerencie produtos, apresentações e saldos atuais.</p>
+          <p className="text-[13px] text-app-text-secondary">
+            {localAtual
+              ? <>Produtos e saldos do local <span className="font-semibold text-app-text">{localAtual.nome}</span>.</>
+              : 'Selecione um local na barra superior para visualizar o estoque.'}
+          </p>
         </div>
         <div className="flex gap-3">
           <button className="btn btn-secondary flex items-center gap-2">
@@ -157,7 +172,6 @@ function Catalog() {
                 <th>Categoria</th>
                 <th>Apresentação</th>
                 <th>Unidade</th>
-                <th>Local</th>
                 <th>Qtd. Atual</th>
                 <th>Status</th>
                 <th className="text-right">Ações</th>
@@ -166,15 +180,21 @@ function Catalog() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-8 text-app-text-secondary">Carregando dados...</td>
+                  <td colSpan="7" className="text-center py-8 text-app-text-secondary">Carregando dados...</td>
                 </tr>
               ) : dadosFiltrados.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-8 text-app-text-secondary">Nenhum estoque encontrado.</td>
+                  <td colSpan="7" className="text-center py-8 text-app-text-secondary">
+                    {localAtual ? 'Nenhum estoque encontrado neste local.' : 'Nenhum local selecionado.'}
+                  </td>
                 </tr>
               ) : (
                 dadosFiltrados.map((item) => (
-                  <tr key={item.id} className="cursor-pointer">
+                  <tr
+                    key={item.id}
+                    className="cursor-pointer"
+                    onClick={() => item.produtoId && navigate(`/produtos/${item.produtoId}`)}
+                  >
                     <td>
                       <div className="flex items-center gap-3">
                         <div className="w-8 h-8 rounded-lg bg-app-bg flex items-center justify-center text-app-text-label">
@@ -188,11 +208,13 @@ function Catalog() {
                     </td>
                     <td>{item.apresentacao}</td>
                     <td>{item.unidade}</td>
-                    <td>{item.local}</td>
                     <td className="font-bold">{item.quantidade}</td>
                     <td>{getStatusBadge(item.status)}</td>
                     <td className="text-right">
-                      <button className="text-app-text-label hover:text-app-text font-semibold text-[12px] uppercase tracking-wide transition-colors">
+                      <button
+                        onClick={(e) => { e.stopPropagation(); item.produtoId && navigate(`/produtos/${item.produtoId}`); }}
+                        className="text-app-text-label hover:text-app-text font-semibold text-[12px] uppercase tracking-wide transition-colors"
+                      >
                         Detalhes
                       </button>
                     </td>

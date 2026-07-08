@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutGrid, ArrowRightLeft, History,
-  ShoppingCart, Settings, Box, LogOut,
+  ShoppingCart, Settings, Box, LogOut, ClipboardList,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -14,6 +14,7 @@ function Sidebar() {
     { name: 'Movimentações',     path: '/movimentacoes',  icon: <ArrowRightLeft size={18} /> },
     { name: 'Histórico',         path: '/historico',      icon: <History size={18} /> },
     { name: 'Sugestão de Compra',path: '/compras',        icon: <ShoppingCart size={18} /> },
+    { name: 'Cadastros',         path: '/cadastros',      icon: <ClipboardList size={18} /> },
   ];
 
   const adminItems = [

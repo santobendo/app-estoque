@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Plus, Trash2, CheckCircle, ChevronLeft, Package, MapPin } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { useLocal } from '../contexts/LocalContext';
 
 /* ─────────────────────────────────────────────
    Componente de rótulo de campo
@@ -60,6 +61,7 @@ const emptyApresentacao = (unidades = []) => ({
 
 export default function CadastroProduto() {
   const navigate = useNavigate();
+  const { localAtual } = useLocal();
 
   /* ── Dados mestres ── */
   const [categorias, setCategorias] = useState([]);
@@ -100,6 +102,19 @@ export default function CadastroProduto() {
     fetchDados();
   }, []);
 
+  /* ── Pré-seleciona o local da barra superior nas apresentações sem local ──
+     Depende de loadingDados porque fetchDados recria a apresentação inicial. */
+  useEffect(() => {
+    if (!localAtual || loadingDados) return;
+    setApresentacoes(prev =>
+      prev.map(a =>
+        a.locais.length === 0
+          ? { ...a, locais: [{ local_id: localAtual.id, quantidade_inicial: '0' }] }
+          : a
+      )
+    );
+  }, [localAtual, loadingDados]);
+
   /* ── Helpers de apresentação ── */
   const updateApresentacao = (index, field, value) =>
     setApresentacoes(prev =>
@@ -107,7 +122,10 @@ export default function CadastroProduto() {
     );
 
   const addApresentacao = () =>
-    setApresentacoes(prev => [...prev, emptyApresentacao(unidades)]);
+    setApresentacoes(prev => [...prev, {
+      ...emptyApresentacao(unidades),
+      locais: localAtual ? [{ local_id: localAtual.id, quantidade_inicial: '0' }] : [],
+    }]);
 
   const removeApresentacao = (index) =>
     setApresentacoes(prev => prev.filter((_, i) => i !== index));

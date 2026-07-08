@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
+import { useLocal } from '../contexts/LocalContext';
 import {
-  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw,
+  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw, AlertCircle,
 } from 'lucide-react';
 
 /* ─── helpers ─── */
@@ -122,6 +124,7 @@ function ProdutoBusca({ onSelect }) {
 ═══════════════════════════════════════════ */
 export default function Movimentacoes() {
   const { user } = useAuth();
+  const { localAtual } = useLocal();
 
   /* ── dados mestres ── */
   const [motivos, setMotivos]       = useState([]);
@@ -173,16 +176,17 @@ export default function Movimentacoes() {
       });
   }, [produto]);
 
-  /* ─ Carrega estoques quando apresentação muda ─ */
+  /* ─ Carrega o estoque da apresentação no local selecionado na barra ─ */
   useEffect(() => {
     setEstoqueId('');
     setEstoqueAtual(null);
-    if (!apresentacaoId) { setEstoques([]); return; }
+    if (!apresentacaoId || !localAtual) { setEstoques([]); return; }
 
     supabase
       .from('estoques')
       .select('id, quantidade_atual, locais(id, nome)')
       .eq('apresentacao_id', Number(apresentacaoId))
+      .eq('local_id', localAtual.id)
       .then(({ data }) => {
         setEstoques(data ?? []);
         if (data?.length) {
@@ -190,7 +194,7 @@ export default function Movimentacoes() {
           setEstoqueAtual(Number(data[0].quantidade_atual));
         }
       });
-  }, [apresentacaoId]);
+  }, [apresentacaoId, localAtual]);
 
   /* ─ Atualiza estoque atual quando local muda ─ */
   useEffect(() => {
@@ -213,7 +217,7 @@ export default function Movimentacoes() {
     const e = {};
     if (!produto)           e.produto      = 'Selecione um produto.';
     if (!apresentacaoId)    e.apresentacao = 'Selecione uma apresentação.';
-    if (!estoqueId)         e.estoque      = 'Selecione o local.';
+    if (!estoqueId)         e.estoque      = `Esta apresentação não está vinculada ao local ${localAtual?.nome ?? 'selecionado'}.`;
     if (!quantidade || Number(quantidade) <= 0)
                             e.quantidade   = 'Informe uma quantidade maior que zero.';
     if (tipo === 'saida' && estoqueAtual !== null && Number(quantidade) > estoqueAtual)
@@ -264,7 +268,11 @@ export default function Movimentacoes() {
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl mb-0.5">Movimentações</h1>
-          <p className="text-[13px] text-app-text-secondary">Registre entradas e saídas de estoque.</p>
+          <p className="text-[13px] text-app-text-secondary">
+            {localAtual
+              ? <>Registre entradas e saídas em <span className="font-semibold text-app-text">{localAtual.nome}</span>.</>
+              : 'Selecione um local na barra superior para registrar movimentações.'}
+          </p>
         </div>
       </header>
 
@@ -353,33 +361,35 @@ export default function Movimentacoes() {
               </div>
             )}
 
-            {/* Local */}
-            {estoques.length > 0 && (
-              <div className="flex flex-col gap-1.5">
-                <Label required>Local de Estoque</Label>
-                <select
-                  value={estoqueId}
-                  onChange={e => setEstoqueId(e.target.value)}
-                  className={`input-base ${erros.estoque ? 'border-rose-400' : ''}`}
-                >
-                  {estoques.map(e => (
-                    <option key={e.id} value={e.id}>
-                      {e.locais?.nome} — saldo: {Number(e.quantidade_atual)}
-                    </option>
-                  ))}
-                </select>
-                {erros.estoque && <span className="text-rose-500 text-[11px]">{erros.estoque}</span>}
+            {/* Apresentação sem vínculo com o local atual */}
+            {apresentacaoId && localAtual && estoques.length === 0 && (
+              <div className="col-span-2 flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-4 py-2.5 text-[12px]">
+                <AlertCircle size={14} className="shrink-0" />
+                <span className="flex-1">
+                  Esta apresentação não está vinculada ao local{' '}
+                  <span className="font-bold">{localAtual.nome}</span>.{' '}
+                  {produto && (
+                    <Link to={`/produtos/${produto.id}`} className="font-bold underline hover:no-underline">
+                      Vincular na tela do produto
+                    </Link>
+                  )}
+                </span>
               </div>
             )}
 
             {/* Estoque atual badge */}
-            {estoqueAtual !== null && apSelecionada && (
+            {estoqueAtual !== null && apSelecionada && localAtual && (
               <div className="col-span-2 flex items-center gap-2">
-                <span className="text-[11px] text-app-text-label">Saldo atual:</span>
+                <span className="text-[11px] text-app-text-label">
+                  Saldo atual em {localAtual.nome}:
+                </span>
                 <span className={`text-[13px] font-bold ${estoqueAtual === 0 ? 'text-rose-500' : 'text-app-text'}`}>
-                  {estoqueAtual} {apSelecionada.unidades?.sigla}
+                  {estoqueAtual} emb. de {Number(apSelecionada.quantidade_unitaria)} {apSelecionada.unidades?.sigla}
                 </span>
               </div>
+            )}
+            {erros.estoque && !estoqueId && (
+              <span className="col-span-2 text-rose-500 text-[11px]">{erros.estoque}</span>
             )}
           </div>
         </div>

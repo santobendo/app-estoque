@@ -353,6 +353,7 @@ select
   mo.descricao                             as motivo_descricao,
   p.nome                                   as produto,
   a.descricao                              as apresentacao,
+  l.id                                     as local_id,
   l.nome                                   as local,
   pf.nome                                  as usuario,
   pa.nome                                  as cargo_usuario,
@@ -523,8 +524,20 @@ create policy "admin pode atualizar apresentacoes"
   on apresentacoes for update to authenticated
   using (fn_is_admin());
 
+create policy "admin pode deletar apresentacoes"
+  on apresentacoes for delete to authenticated
+  using (fn_is_admin());
+
+create policy "admin pode deletar estoques"
+  on estoques for delete to authenticated
+  using (fn_is_admin());
+
 create policy "admin pode atualizar locais"
   on locais for update to authenticated
+  using (fn_is_admin());
+
+create policy "admin pode deletar locais"
+  on locais for delete to authenticated
   using (fn_is_admin());
 
 -- -------------------------------------------------------------
@@ -533,7 +546,12 @@ create policy "admin pode atualizar locais"
 create or replace function fn_protege_perfil()
 returns trigger language plpgsql security definer as $$
 begin
-  if not fn_is_admin() then
+  -- auth.uid() é NULL quando o update vem do SQL Editor ou da service role
+  -- (contexto administrativo) — nesses casos a proteção não se aplica.
+  -- Isso permite promover o primeiro admin sem desabilitar triggers.
+  -- Pela API, requisições sem auth.uid() são anon/service_role, e anon
+  -- não passa nas policies de update (todas são "to authenticated").
+  if auth.uid() is not null and not fn_is_admin() then
     if NEW.is_admin is distinct from OLD.is_admin then
       raise exception 'Apenas administradores podem alterar o campo is_admin.';
     end if;
@@ -610,12 +628,106 @@ insert into estoques (apresentacao_id, local_id) values
   (3, 2),  -- Detergente 500ml   / Cozinha
   (4, 2);  -- Papel Toalha Rolo  / Cozinha
 
--- =============================================================
--- NOTA: PRIMEIRO ADMINISTRADOR
--- O trigger fn_cria_perfil cria todo perfil com is_admin = false.
--- Após criar seu primeiro usuário, promova-o a admin via SQL:
+-- -------------------------------------------------------------
+-- 20. USUÁRIO ADMIN INICIAL (bootstrap)
+--     Cria admin@estoque.com (senha: estoque) direto no Supabase
+--     Auth, já confirmado e promovido a admin. Idempotente: se o
+--     e-mail já existir, não faz nada.
 --
---   update perfis set is_admin = true where id = '<seu-user-uuid>';
+--     ATENÇÃO:
+--       * Insert manual em auth.users não é oficialmente suportado
+--         pela Supabase — se falhar após um upgrade do Auth, use o
+--         plano B descrito na NOTA no fim do arquivo.
+--       * Troque a senha "estoque" assim que o app for usado de
+--         verdade pela empresa.
+-- -------------------------------------------------------------
+do $$
+declare
+  v_user_id uuid := gen_random_uuid();
+begin
+  if exists (select 1 from auth.users where email = 'admin@estoque.com') then
+    raise notice 'admin@estoque.com já existe — nada a fazer.';
+    return;
+  end if;
+
+  insert into auth.users (
+    instance_id, id, aud, role, email,
+    encrypted_password, email_confirmed_at,
+    raw_app_meta_data, raw_user_meta_data,
+    created_at, updated_at,
+    confirmation_token, recovery_token,
+    email_change, email_change_token_new, email_change_token_current
+  ) values (
+    '00000000-0000-0000-0000-000000000000',
+    v_user_id,
+    'authenticated',
+    'authenticated',
+    'admin@estoque.com',
+    extensions.crypt('estoque', extensions.gen_salt('bf')),
+    now(),
+    '{"provider":"email","providers":["email"]}'::jsonb,
+    '{"nome":"Administrador"}'::jsonb,
+    now(), now(),
+    -- Strings vazias (não NULL) — NULL nesses campos quebra o login
+    -- em versões atuais do GoTrue ("converting NULL to string").
+    '', '', '', '', ''
+  );
+
+  -- Identidade e-mail/senha — obrigatória nas versões atuais do Auth
+  insert into auth.identities (
+    id, user_id, provider_id, provider,
+    identity_data, last_sign_in_at, created_at, updated_at
+  ) values (
+    gen_random_uuid(),
+    v_user_id,
+    v_user_id::text,
+    'email',
+    jsonb_build_object(
+      'sub',            v_user_id::text,
+      'email',          'admin@estoque.com',
+      'email_verified', true
+    ),
+    now(), now(), now()
+  );
+
+  -- O insert acima disparou tg_cria_perfil (is_admin = false);
+  -- aqui promovemos. Funciona porque fn_protege_perfil libera
+  -- alterações quando auth.uid() é NULL (contexto administrativo).
+  update public.perfis set is_admin = true where id = v_user_id;
+
+  raise notice 'admin@estoque.com criado e promovido a admin.';
+end $$;
+
+-- =============================================================
+-- NOTA: PRIMEIRO ADMINISTRADOR — PLANO B (manual)
+-- Se o bloco 20 falhar (ex: mudança interna no schema do Auth):
+--
+--   1. Crie o usuário no Dashboard do Supabase:
+--      Authentication > Users > Add user (marque "Auto Confirm User").
+--      O trigger tg_cria_perfil criará a linha em perfis automaticamente.
+--
+--   2. No SQL Editor, promova-o a admin:
+--
+--        update public.perfis
+--           set is_admin = true
+--         where id = (select id from auth.users where email = 'seu@email.com');
+--
+--      Isso funciona porque fn_protege_perfil libera a alteração quando
+--      auth.uid() é NULL (contexto do SQL Editor / service role).
+--      Não é necessário desabilitar nenhum trigger.
+--
+--   3. Confira o resultado:
+--
+--        select u.email, p.nome, p.is_admin, p.ativo
+--          from auth.users u
+--          left join public.perfis p on p.id = u.id;
+--
+--      Se p.* vier NULL, o perfil não foi criado (usuário criado com o
+--      trigger desabilitado). Corrija com:
+--
+--        insert into public.perfis (id, nome, is_admin)
+--        select id, coalesce(raw_user_meta_data->>'nome', email), true
+--          from auth.users where email = 'seu@email.com';
 --
 -- =============================================================
 

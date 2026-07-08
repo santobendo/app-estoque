@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { useLocal } from '../contexts/LocalContext';
 import { Search, ArrowDownCircle, ArrowUpCircle, ChevronLeft, ChevronRight } from 'lucide-react';
 
 const PAGE_SIZE = 20;
@@ -30,6 +31,7 @@ function formatarData(iso) {
 }
 
 export default function Historico() {
+  const { localAtual, loadingLocal } = useLocal();
   const [rows, setRows]         = useState([]);
   const [total, setTotal]       = useState(0);
   const [loading, setLoading]   = useState(true);
@@ -42,11 +44,19 @@ export default function Historico() {
   const [filtroFim, setFiltroFim]       = useState('');
 
   const fetchHistorico = useCallback(async () => {
+    if (loadingLocal) return;
+    if (!localAtual) {
+      setRows([]);
+      setTotal(0);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
 
     let query = supabase
       .from('vw_auditoria_movimentacoes')
       .select('*', { count: 'exact' })
+      .eq('local_id', localAtual.id)
       .order('data', { ascending: false })
       .range(pagina * PAGE_SIZE, pagina * PAGE_SIZE + PAGE_SIZE - 1);
 
@@ -55,7 +65,7 @@ export default function Historico() {
     if (filtroFim)    query = query.lte('data', new Date(filtroFim + 'T23:59:59').toISOString());
     if (busca.trim()) {
       query = query.or(
-        `produto.ilike.%${busca}%,local.ilike.%${busca}%,usuario.ilike.%${busca}%`
+        `produto.ilike.%${busca}%,usuario.ilike.%${busca}%`
       );
     }
 
@@ -65,12 +75,12 @@ export default function Historico() {
       setTotal(count ?? 0);
     }
     setLoading(false);
-  }, [pagina, filtroTipo, filtroInicio, filtroFim, busca]);
+  }, [pagina, filtroTipo, filtroInicio, filtroFim, busca, localAtual, loadingLocal]);
 
   useEffect(() => { fetchHistorico(); }, [fetchHistorico]);
 
-  /* resetar página ao mudar filtros */
-  useEffect(() => { setPagina(0); }, [filtroTipo, filtroInicio, filtroFim, busca]);
+  /* resetar página ao mudar filtros ou local */
+  useEffect(() => { setPagina(0); }, [filtroTipo, filtroInicio, filtroFim, busca, localAtual]);
 
   const totalPaginas = Math.ceil(total / PAGE_SIZE);
 
@@ -80,7 +90,9 @@ export default function Historico() {
       <header>
         <h1 className="text-2xl mb-0.5">Histórico</h1>
         <p className="text-[13px] text-app-text-secondary">
-          Registro completo de todas as movimentações de estoque.
+          {localAtual
+            ? <>Movimentações registradas em <span className="font-semibold text-app-text">{localAtual.nome}</span>.</>
+            : 'Selecione um local na barra superior para ver o histórico.'}
         </p>
       </header>
 
@@ -97,7 +109,7 @@ export default function Historico() {
               type="text"
               value={busca}
               onChange={e => setBusca(e.target.value)}
-              placeholder="Produto, local ou usuário..."
+              placeholder="Produto ou usuário..."
               className="input-base w-full pl-8 py-2 text-[12px]"
             />
           </div>
@@ -160,7 +172,6 @@ export default function Historico() {
                 <th>Tipo</th>
                 <th>Produto</th>
                 <th>Apresentação</th>
-                <th>Local</th>
                 <th>Qtd</th>
                 <th>Unidade</th>
                 <th>Motivo</th>
@@ -170,14 +181,14 @@ export default function Historico() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="9" className="text-center py-10 text-app-text-secondary text-[13px]">
+                  <td colSpan="8" className="text-center py-10 text-app-text-secondary text-[13px]">
                     Carregando...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan="9" className="text-center py-10 text-app-text-secondary text-[13px]">
-                    Nenhuma movimentação encontrada.
+                  <td colSpan="8" className="text-center py-10 text-app-text-secondary text-[13px]">
+                    Nenhuma movimentação encontrada neste local.
                   </td>
                 </tr>
               ) : (
@@ -187,7 +198,6 @@ export default function Historico() {
                     <td><TipoBadge tipo={r.tipo} /></td>
                     <td className="font-semibold">{r.produto}</td>
                     <td className="text-app-text-secondary text-[12px]">{r.apresentacao}</td>
-                    <td className="text-[12px]">{r.local}</td>
                     <td className="font-bold">{Number(r.quantidade)}</td>
                     <td className="text-[12px] text-app-text-secondary">{r.unidade}</td>
                     <td className="text-[12px]">{r.motivo_descricao ?? '—'}</td>

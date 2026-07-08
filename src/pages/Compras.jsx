@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { useLocal } from '../contexts/LocalContext';
 import { ShoppingCart, TrendingUp, Package, AlertCircle } from 'lucide-react';
 
 function StatCard({ label, value, sub, color = 'text-app-text' }) {
@@ -13,28 +14,36 @@ function StatCard({ label, value, sub, color = 'text-app-text' }) {
 }
 
 export default function Compras() {
+  const { localAtual, loadingLocal } = useLocal();
   const [rows, setRows]       = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca]     = useState('');
 
   useEffect(() => {
+    if (loadingLocal) return;
+    if (!localAtual) {
+      setRows([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
     supabase
       .from('vw_sugestao_compra')
       .select('*')
+      .eq('local_id', localAtual.id)
       .order('quantidade_sugerida_compra', { ascending: false })
       .then(({ data }) => {
         setRows(data ?? []);
         setLoading(false);
       });
-  }, []);
+  }, [localAtual, loadingLocal]);
 
   const filtrados = rows.filter(r => {
     if (!busca.trim()) return true;
     const t = busca.toLowerCase();
     return (
       r.produto?.toLowerCase().includes(t) ||
-      r.categoria?.toLowerCase().includes(t) ||
-      r.local?.toLowerCase().includes(t)
+      r.categoria?.toLowerCase().includes(t)
     );
   });
 
@@ -55,7 +64,9 @@ export default function Compras() {
       <header>
         <h1 className="text-2xl mb-0.5">Sugestão de Compra</h1>
         <p className="text-[13px] text-app-text-secondary">
-          Baseado no consumo dos últimos 30 dias versus o estoque atual.
+          {localAtual
+            ? <>Consumo dos últimos 30 dias versus estoque atual em <span className="font-semibold text-app-text">{localAtual.nome}</span>.</>
+            : 'Selecione um local na barra superior para ver as sugestões.'}
         </p>
       </header>
 
@@ -76,7 +87,7 @@ export default function Compras() {
         <StatCard
           label="Total de itens"
           value={loading ? '—' : rows.length}
-          sub="produtos × locais monitorados"
+          sub="produtos monitorados neste local"
         />
       </div>
 
@@ -88,7 +99,7 @@ export default function Compras() {
             type="text"
             value={busca}
             onChange={e => setBusca(e.target.value)}
-            placeholder="Filtrar por produto, categoria ou local..."
+            placeholder="Filtrar por produto ou categoria..."
             className="input-base w-full pl-9 py-2 text-[12px]"
           />
         </div>
@@ -102,7 +113,6 @@ export default function Compras() {
               <tr>
                 <th>Produto</th>
                 <th>Categoria</th>
-                <th>Local</th>
                 <th>Unidade</th>
                 <th className="text-right">Consumo 30d</th>
                 <th className="text-right">Estoque Atual</th>
@@ -112,14 +122,14 @@ export default function Compras() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-10 text-app-text-secondary text-[13px]">
+                  <td colSpan="6" className="text-center py-10 text-app-text-secondary text-[13px]">
                     Carregando...
                   </td>
                 </tr>
               ) : filtrados.length === 0 ? (
                 <tr>
-                  <td colSpan="7" className="text-center py-10 text-app-text-secondary text-[13px]">
-                    Nenhum item encontrado.
+                  <td colSpan="6" className="text-center py-10 text-app-text-secondary text-[13px]">
+                    Nenhum item encontrado neste local.
                   </td>
                 </tr>
               ) : (
@@ -139,7 +149,6 @@ export default function Compras() {
                       <td>
                         <span className="text-[12px] text-app-text-secondary">{r.categoria ?? '—'}</span>
                       </td>
-                      <td className="text-[12px]">{r.local}</td>
                       <td className="text-[12px] text-app-text-secondary">{r.unidade}</td>
                       <td className="text-right">
                         <span className="flex items-center justify-end gap-1 text-[13px]">
