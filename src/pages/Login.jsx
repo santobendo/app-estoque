@@ -2,12 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
-import { Box, Lock, Mail } from 'lucide-react';
+import { Box, Lock, AtSign } from 'lucide-react';
+
+const DOMINIO = '@estoque.com';
+
+function sanitizarUsuario(texto) {
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/\s+/g, '.')
+    .replace(/[^a-z0-9._-]/g, '');
+}
 
 function traduzErroLogin(error) {
   const msg = error.message?.toLowerCase() ?? '';
-  if (msg.includes('invalid login credentials')) return 'E-mail ou senha incorretos.';
-  if (msg.includes('email not confirmed'))       return 'E-mail ainda não confirmado. Verifique sua caixa de entrada.';
+  if (msg.includes('invalid login credentials')) return 'Usuário ou senha incorretos.';
+  if (msg.includes('email not confirmed'))       return 'Conta pendente de confirmação. Fale com o administrador.';
   if (msg.includes('user is banned') || msg.includes('banned')) return 'Esta conta está bloqueada. Fale com o administrador.';
   if (msg.includes('rate limit') || msg.includes('too many'))   return 'Muitas tentativas. Aguarde alguns minutos e tente de novo.';
   if (msg.includes('failed to fetch') || msg.includes('network')) return 'Falha de conexão. Verifique sua internet.';
@@ -15,13 +26,13 @@ function traduzErroLogin(error) {
 }
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const [usuario, setUsuario] = useState('');
   const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading]   = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
   const { session } = useAuth();
-  const navigate = useNavigate();
+  const navigate    = useNavigate();
 
   useEffect(() => {
     if (session) {
@@ -34,10 +45,10 @@ export default function Login() {
     setLoading(true);
     setErrorMsg('');
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    // Concatena o domínio fixo para formar o e-mail de autenticação sanitizado
+    const email = sanitizarUsuario(usuario) + DOMINIO;
+
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
       setErrorMsg(traduzErroLogin(error));
@@ -63,23 +74,34 @@ export default function Login() {
         )}
 
         <form onSubmit={handleLogin} className="flex flex-col gap-4">
+          {/* Campo Usuário com sufixo visual @estoque.com */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[12px] font-bold text-app-text-label uppercase tracking-wider">
-              E-mail
+              Usuário
             </label>
-            <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-label" size={18} />
+            <div className="relative flex items-center">
+              <AtSign className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-label shrink-0" size={18} />
               <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                type="text"
+                value={usuario}
+                onChange={(e) => setUsuario(sanitizarUsuario(e.target.value))}
                 required
-                className="input-base w-full pl-10"
-                placeholder="seu@email.com"
+                className="input-base w-full pl-10 pr-[110px]"
+                placeholder="seu.usuario"
+                autoComplete="username"
+                autoCapitalize="none"
               />
+              {/* Sufixo @estoque.com fixo e visualmente apagado */}
+              <span
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-[13px] text-app-text-label/50 select-none pointer-events-none font-mono"
+                aria-hidden="true"
+              >
+                {DOMINIO}
+              </span>
             </div>
           </div>
 
+          {/* Senha */}
           <div className="flex flex-col gap-1.5">
             <label className="text-[12px] font-bold text-app-text-label uppercase tracking-wider">
               Senha
@@ -93,6 +115,7 @@ export default function Login() {
                 required
                 className="input-base w-full pl-10"
                 placeholder="••••••••"
+                autoComplete="current-password"
               />
             </div>
           </div>
