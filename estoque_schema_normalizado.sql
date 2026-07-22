@@ -690,8 +690,8 @@ comment on function fn_cria_produto_completo(text, int, jsonb) is
 
 -- Papéis operacionais (sem "Admin" — administração é via is_admin)
 insert into papeis (nome, descricao) values
-  ('Almoxarife',  'Controla entrada e saída de materiais'),
-  ('Cozinheiro',  'Registra consumo de itens na cozinha');
+  ('Almoxarife',  'Controla entrada e saída de materiais');
+  --('Cozinheiro',  'Registra consumo de itens na cozinha');
 
 insert into categorias (nome) values
   ('Limpeza'),
@@ -727,15 +727,15 @@ insert into produtos (nome, categoria_id) values
 insert into apresentacoes (produto_id, descricao, quantidade_unitaria, unidade_id) values
   (1, 'Frasco 2L',    2,   (select id from unidades where sigla = 'L')),
   (1, 'Galão 5L',     5,   (select id from unidades where sigla = 'L')),
-  (2, 'Frasco 500ml', 0.5, (select id from unidades where sigla = 'L')),
+  --(2, 'Frasco 500ml', 0.5, (select id from unidades where sigla = 'L')),
   (3, 'Rolo',         1,   (select id from unidades where sigla = 'un'));
 
 insert into estoques (apresentacao_id, local_id) values
   (1, 1),  -- Água Sanitária 2L  / Almoxarifado
   (2, 1),  -- Água Sanitária 5L  / Almoxarifado
-  (3, 1),  -- Detergente 500ml   / Almoxarifado
+  --(3, 1),  -- Detergente 500ml   / Almoxarifado
   (4, 1),  -- Papel Toalha Rolo  / Almoxarifado
-  (3, 2),  -- Detergente 500ml   / Cozinha
+  --(3, 2),  -- Detergente 500ml   / Cozinha
   (4, 2);  -- Papel Toalha Rolo  / Cozinha
 
 -- -------------------------------------------------------------
