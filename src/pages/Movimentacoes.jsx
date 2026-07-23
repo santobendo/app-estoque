@@ -96,7 +96,7 @@ function ProdutoBusca({ onSelect }) {
         )}
       </div>
       {aberto && resultados.length > 0 && (
-        <ul className="absolute z-50 w-full mt-1 bg-white border border-app-border rounded-xl shadow-lg overflow-hidden">
+        <ul className="absolute z-50 w-full mt-1 bg-white border border-app-border rounded-xl shadow-lg max-h-60 overflow-y-auto">
           {resultados.map(p => (
             <li
               key={p.id}
@@ -344,7 +344,7 @@ export default function Movimentacoes() {
         </div>
 
         {/* ── Produto ── */}
-        <div className="card">
+        <div className="card !overflow-visible h-[289px]">
           <SectionHeader number="2" title="Produto" />
           <div className="p-6 grid grid-cols-2 gap-4">
             <div className="col-span-2 flex flex-col gap-1.5">
