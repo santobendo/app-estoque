@@ -167,6 +167,9 @@ export default function CadastroProduto() {
       novosErros.nomeProduto = 'Nome do produto é obrigatório.';
     }
     apresentacoes.forEach((a, i) => {
+      if (!a.descricao.trim()) {
+        novosErros[`ap_${i}_descricao`] = 'Descrição da apresentação é obrigatória.';
+      }
       if (!a.quantidade_unitaria || Number(a.quantidade_unitaria) <= 0) {
         novosErros[`ap_${i}_qtd`] = 'Quantidade deve ser maior que zero.';
       }
@@ -421,14 +424,17 @@ function ApresentacaoCard({
       <div className="grid grid-cols-2 gap-4">
         {/* Descrição da embalagem */}
         <div className="col-span-2 flex flex-col gap-1.5">
-          <Label>Descrição da Embalagem</Label>
+          <Label required>Descrição da Embalagem</Label>
           <input
             type="text"
             value={ap.descricao}
             onChange={(e) => onUpdate(index, 'descricao', e.target.value)}
             placeholder="Ex: Galão 5L, Frasco 500ml, Rolo..."
-            className="input-base"
+            className={`input-base ${erros[`ap_${index}_descricao`] ? 'border-rose-400 focus:border-rose-400' : ''}`}
           />
+          {erros[`ap_${index}_descricao`] && (
+            <span className="text-rose-500 text-[11px]">{erros[`ap_${index}_descricao`]}</span>
+          )}
         </div>
 
         {/* Quantidade unitária */}
