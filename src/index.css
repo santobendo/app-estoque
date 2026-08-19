@@ -143,3 +143,43 @@
     @apply bg-violet-500;
   }
 }
+
+/* ------------------------------------------------------------------
+   Impressão
+   Sidebar/TopBar e os controles de cada tela se escondem sozinhos via
+   a variante print:hidden. O que fica aqui é o que não dá para resolver
+   por utilitário: página, quebras e cores.
+   ------------------------------------------------------------------ */
+@media print {
+  @page {
+    margin: 1.5cm;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  /* Cabeçalho da tabela se repete em cada página do relatório */
+  thead {
+    display: table-header-group;
+  }
+
+  /* Não corta uma linha no meio entre duas páginas */
+  tr {
+    break-inside: avoid;
+  }
+
+  /* Sombra e borda arredondada viram sujeira no papel */
+  .card,
+  .table-wrapper {
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  /* Sem isso o navegador descarta os fundos dos badges */
+  .badge {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

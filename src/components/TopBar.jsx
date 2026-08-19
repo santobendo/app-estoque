@@ -12,7 +12,7 @@ export default function TopBar() {
   const isGlobal = ROTAS_GLOBAIS.some(r => pathname.startsWith(r));
 
   return (
-    <div className="h-14 bg-white border-b border-app-border flex items-center gap-3 px-5 shrink-0">
+    <div className="h-14 bg-white border-b border-app-border flex items-center gap-3 px-5 shrink-0 print:hidden">
       <div className="flex items-center gap-2 shrink-0">
         <MapPin size={15} className="text-app-text-label" />
         <span className="text-[11px] font-bold text-app-text-label uppercase tracking-widest">Local</span>

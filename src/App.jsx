@@ -11,6 +11,7 @@ import CadastroProduto    from './pages/CadastroProduto';
 import Movimentacoes      from './pages/Movimentacoes';
 import Historico          from './pages/Historico';
 import Compras            from './pages/Compras';
+import RelatorioEstoque   from './pages/RelatorioEstoque';
 import Configuracoes      from './pages/Configuracoes';
 import Cadastros          from './pages/Cadastros';
 import ProdutoDetalhe     from './pages/ProdutoDetalhe';
@@ -33,6 +34,7 @@ function App() {
             <Route path="movimentacoes"    element={<Movimentacoes />} />
             <Route path="historico"        element={<Historico />} />
             <Route path="compras"          element={<Compras />} />
+            <Route path="relatorio-estoque" element={<RelatorioEstoque />} />
             <Route path="cadastros"            element={<Cadastros />} />
             <Route path="cadastros/categorias" element={<CadastroCategorias />} />
             <Route path="cadastros/locais"     element={<CadastroLocais />} />

@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutGrid, ArrowRightLeft, History,
-  ShoppingCart, Settings, Box, LogOut, ClipboardList,
+  ShoppingCart, Settings, Box, LogOut, ClipboardList, FileText,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -14,6 +14,7 @@ function Sidebar() {
     { name: 'Movimentações',     path: '/movimentacoes',  icon: <ArrowRightLeft size={18} /> },
     { name: 'Histórico',         path: '/historico',      icon: <History size={18} /> },
     { name: 'Sugestão de Compra',path: '/compras',        icon: <ShoppingCart size={18} /> },
+    { name: 'Relatório de Estoque',path: '/relatorio-estoque', icon: <FileText size={18} /> },
     { name: 'Cadastros',         path: '/cadastros',      icon: <ClipboardList size={18} /> },
   ];
 
@@ -26,7 +27,7 @@ function Sidebar() {
   const userInitial = userName.substring(0, 2).toUpperCase();
 
   return (
-    <aside className="w-60 bg-white border-r border-app-border flex flex-col shrink-0">
+    <aside className="w-60 bg-white border-r border-app-border flex flex-col shrink-0 print:hidden">
       {/* Logo */}
       <div className="h-14 flex items-center px-5 border-b border-app-border-inner">
         <Box className="text-app-text mr-2 shrink-0" size={20} />
