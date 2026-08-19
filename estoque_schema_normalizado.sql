@@ -286,7 +286,10 @@ for each row execute function fn_atualiza_estoque();
 -- -------------------------------------------------------------
 -- 12. VIEW — consumo por produto nos últimos 30 dias
 --     Ajustada para usar motivo_id em vez de texto livre.
---     O código 'descarte' é filtrado via join na tabela motivos.
+--     Os códigos 'descarte' e 'ajuste' são filtrados via join na
+--     tabela motivos: descarte não é consumo real, e ajuste é uma
+--     correção de contagem (não demanda) — contá-los inflacionaria
+--     a sugestão de compra sem relação com consumo de fato.
 -- -------------------------------------------------------------
 -- Consolida por produto × local × unidade: apresentações diferentes do
 -- mesmo produto (ex: pacote 500g e pacote 1kg) somam na unidade base.
@@ -306,7 +309,7 @@ with consumo as (
   join apresentacoes a  on a.id = e.apresentacao_id
   left join motivos_movimentacao mo on mo.id = m.motivo_id
   where m.tipo  = 'saida'
-    and (mo.codigo is null or mo.codigo != 'descarte')
+    and (mo.codigo is null or mo.codigo not in ('descarte', 'ajuste'))
     and m.data >= now() - interval '30 days'
   group by e.local_id, a.produto_id, a.unidade_id
 ),
@@ -343,7 +346,7 @@ left join consumo   co on co.produto_id = s.produto_id
                       and co.unidade_id = s.unidade_id;
 
 comment on view vw_consumo_30_dias is
-  'Consumo real (excluindo descartes) dos últimos 30 dias, consolidado por produto, local e unidade base. Inclui produtos sem consumo recente.';
+  'Consumo real (excluindo descartes e ajustes de inventário) dos últimos 30 dias, consolidado por produto, local e unidade base. Inclui produtos sem consumo recente.';
 
 -- -------------------------------------------------------------
 -- 13. VIEW — sugestão de compra para o próximo mês
@@ -502,9 +505,22 @@ create policy "ativos podem inserir estoques"
   on estoques for insert to authenticated
   with check (fn_is_ativo());
 
+-- Ajuste de inventário (contagem física) só pode ser lançado por admin —
+-- esse motivo reconcilia o saldo do sistema com a contagem real e pode
+-- mascarar perdas/erros se qualquer usuário puder usá-lo livremente.
 create policy "ativos podem inserir movimentacoes"
   on movimentacoes for insert to authenticated
-  with check (criado_por = auth.uid() and fn_is_ativo());
+  with check (
+    criado_por = auth.uid()
+    and fn_is_ativo()
+    and (
+      not exists (
+        select 1 from motivos_movimentacao mo
+        where mo.id = motivo_id and mo.codigo = 'ajuste'
+      )
+      or fn_is_admin()
+    )
+  );
 
 -- === ATUALIZAÇÃO — perfil próprio ===
 create policy "usuario edita proprio perfil"

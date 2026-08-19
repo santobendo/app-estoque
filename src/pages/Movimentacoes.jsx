@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocal } from '../contexts/LocalContext';
 import {
-  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw, AlertCircle, X,
+  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw, AlertCircle, X, Scale,
 } from 'lucide-react';
 import { traduzErro } from '../components/TabelaCrud';
 
@@ -124,7 +124,7 @@ function ProdutoBusca({ onSelect }) {
    Página principal
 ═══════════════════════════════════════════ */
 export default function Movimentacoes() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const { localAtual } = useLocal();
 
   /* ── dados mestres ── */
@@ -133,12 +133,14 @@ export default function Movimentacoes() {
   const [estoques, setEstoques]     = useState([]); // estoques da apresentação selecionada
 
   /* ── seleções ── */
+  const [modo, setModo]                 = useState('movimento'); // 'movimento' | 'ajuste'
   const [produto, setProduto]           = useState(null);
   const [apresentacaoId, setApresentacaoId] = useState('');
   const [estoqueId, setEstoqueId]       = useState('');
   const [tipo, setTipo]                 = useState('saida');
   const [motivoId, setMotivoId]         = useState('');
   const [quantidade, setQuantidade]     = useState('');
+  const [quantidadeContada, setQuantidadeContada] = useState('');
   const [data, setData]                 = useState(() => new Date().toISOString().slice(0, 16));
 
   /* ── estado ── */
@@ -148,14 +150,14 @@ export default function Movimentacoes() {
   const [erroSubmit, setErroSubmit] = useState(null);
   const [estoqueAtual, setEstoqueAtual] = useState(null);
 
-  /* ─ Carrega motivos ─ */
+  /* ─ Carrega motivos ─
+     Não define motivoId aqui: o motivo padrão depende do tipo e da lista
+     filtrada — isso é resolvido no efeito abaixo, senão o valor pode
+     apontar para um motivo que não está entre as opções visíveis. */
   useEffect(() => {
     supabase.from('motivos_movimentacao').select('id, codigo, descricao').order('descricao')
       .then(({ data }) => {
-        if (data) {
-          setMotivos(data);
-          setMotivoId(String(data[0]?.id ?? ''));
-        }
+        if (data) setMotivos(data);
       });
   }, []);
 
@@ -204,15 +206,31 @@ export default function Movimentacoes() {
     setEstoqueAtual(est ? Number(est.quantidade_atual) : null);
   }, [estoqueId, estoques]);
 
-  /* ─ Filtra motivos conforme tipo ─ */
+  /* ─ Filtra motivos conforme tipo ─
+     'ajuste' não aparece aqui: tem fluxo próprio (modo "Ajuste de contagem"),
+     que calcula a diferença automaticamente e é restrito a admin via RLS. */
   const motivosFiltrados = motivos.filter(m => {
-    if (tipo === 'entrada') return ['compra', 'ajuste', 'outro'].includes(m.codigo);
-    return ['uso', 'descarte', 'ajuste', 'outro'].includes(m.codigo);
+    if (tipo === 'entrada') return ['compra', 'outro'].includes(m.codigo);
+    return ['uso', 'descarte', 'outro'].includes(m.codigo);
   });
 
+  const motivoAjuste = motivos.find(m => m.codigo === 'ajuste');
+
+  /* Garante que motivoId seja sempre um motivo presente na lista filtrada.
+     Roda quando os motivos carregam ou o tipo muda; só reescreve se o
+     valor atual não estiver entre as opções válidas (evita loop e não
+     atrapalha uma escolha manual do usuário). */
   useEffect(() => {
-    if (motivosFiltrados.length) setMotivoId(String(motivosFiltrados[0].id));
-  }, [tipo]);
+    if (!motivosFiltrados.length) return;
+    if (!motivosFiltrados.some(m => String(m.id) === motivoId)) {
+      setMotivoId(String(motivosFiltrados[0].id));
+    }
+  }, [tipo, motivos]);
+
+  /* ─ Diferença entre a contagem física e o saldo do sistema (modo ajuste) ─ */
+  const diferencaAjuste = quantidadeContada !== '' && estoqueAtual !== null
+    ? Number(quantidadeContada) - estoqueAtual
+    : null;
 
   /* ─ Validação ─ */
   const validate = () => {
@@ -220,10 +238,18 @@ export default function Movimentacoes() {
     if (!produto)           e.produto      = 'Selecione um produto.';
     if (!apresentacaoId)    e.apresentacao = 'Selecione uma apresentação.';
     if (!estoqueId)         e.estoque      = `Esta apresentação não está vinculada ao local ${localAtual?.nome ?? 'selecionado'}.`;
-    if (!quantidade || Number(quantidade) <= 0)
+
+    if (modo === 'ajuste') {
+      if (quantidadeContada === '' || Number(quantidadeContada) < 0)
+                            e.quantidade   = 'Informe a quantidade contada fisicamente (pode ser zero).';
+      else if (diferencaAjuste === 0)
+                            e.quantidade   = 'A contagem já bate com o saldo do sistema — nenhum ajuste necessário.';
+    } else {
+      if (!quantidade || Number(quantidade) <= 0)
                             e.quantidade   = 'Informe uma quantidade maior que zero.';
-    if (tipo === 'saida' && estoqueAtual !== null && Number(quantidade) > estoqueAtual)
+      if (tipo === 'saida' && estoqueAtual !== null && Number(quantidade) > estoqueAtual)
                             e.quantidade   = `Estoque insuficiente. Disponível: ${estoqueAtual}`;
+    }
     setErros(e);
     return Object.keys(e).length === 0;
   };
@@ -235,14 +261,52 @@ export default function Movimentacoes() {
     if (!validate()) return;
     setLoading(true);
 
-    const { error } = await supabase.from('movimentacoes').insert([{
-      estoque_id: Number(estoqueId),
-      criado_por: user.id,
-      tipo,
-      quantidade: Number(quantidade),
-      motivo_id: motivoId ? Number(motivoId) : null,
-      data: new Date(data).toISOString(),
-    }]);
+    let payload;
+    if (modo === 'ajuste') {
+      // Reconsulta o saldo atual para reduzir a chance de ajustar em cima
+      // de um valor desatualizado (ex: outra pessoa lançou algo enquanto
+      // o formulário estava aberto).
+      const { data: estAtual, error: errEst } = await supabase
+        .from('estoques')
+        .select('quantidade_atual')
+        .eq('id', Number(estoqueId))
+        .single();
+
+      if (errEst) {
+        setLoading(false);
+        setErroSubmit(traduzErro(errEst));
+        return;
+      }
+
+      const saldoReal = Number(estAtual.quantidade_atual);
+      const diferenca = Number(quantidadeContada) - saldoReal;
+
+      if (diferenca === 0) {
+        setLoading(false);
+        setErros({ quantidade: 'A contagem já bate com o saldo do sistema — nenhum ajuste necessário.' });
+        return;
+      }
+
+      payload = {
+        estoque_id: Number(estoqueId),
+        criado_por: user.id,
+        tipo: diferenca > 0 ? 'entrada' : 'saida',
+        quantidade: Math.abs(diferenca),
+        motivo_id: motivoAjuste?.id ?? null,
+        data: new Date(data).toISOString(),
+      };
+    } else {
+      payload = {
+        estoque_id: Number(estoqueId),
+        criado_por: user.id,
+        tipo,
+        quantidade: Number(quantidade),
+        motivo_id: motivoId ? Number(motivoId) : null,
+        data: new Date(data).toISOString(),
+      };
+    }
+
+    const { error } = await supabase.from('movimentacoes').insert([payload]);
 
     setLoading(false);
 
@@ -259,6 +323,7 @@ export default function Movimentacoes() {
     setApresentacaoId('');
     setEstoqueId('');
     setQuantidade('');
+    setQuantidadeContada('');
     setData(new Date().toISOString().slice(0, 16));
     setErros({});
   };
@@ -284,7 +349,7 @@ export default function Movimentacoes() {
           <div className="flex items-center gap-3">
             <CheckCircle size={20} className="text-emerald-500 shrink-0" />
             <span className="text-[13px] font-semibold text-app-text">
-              Movimentação registrada com sucesso!
+              {modo === 'ajuste' ? 'Ajuste registrado com sucesso!' : 'Movimentação registrada com sucesso!'}
             </span>
           </div>
           <button
@@ -309,12 +374,12 @@ export default function Movimentacoes() {
         {/* ── Tipo ── */}
         <div className="card">
           <SectionHeader number="1" title="Tipo de Movimentação" />
-          <div className="p-6 grid grid-cols-2 gap-3">
+          <div className={`p-6 grid gap-3 ${isAdmin ? 'grid-cols-3' : 'grid-cols-2'}`}>
             <button
               type="button"
-              onClick={() => setTipo('saida')}
+              onClick={() => { setModo('movimento'); setTipo('saida'); }}
               className={`flex items-center gap-3 p-4 rounded-xl border-[1.5px] transition-all cursor-pointer ${
-                tipo === 'saida'
+                modo === 'movimento' && tipo === 'saida'
                   ? 'border-rose-400 bg-rose-50 text-rose-700'
                   : 'border-app-border hover:border-rose-200 text-app-text-secondary'
               }`}
@@ -327,9 +392,9 @@ export default function Movimentacoes() {
             </button>
             <button
               type="button"
-              onClick={() => setTipo('entrada')}
+              onClick={() => { setModo('movimento'); setTipo('entrada'); }}
               className={`flex items-center gap-3 p-4 rounded-xl border-[1.5px] transition-all cursor-pointer ${
-                tipo === 'entrada'
+                modo === 'movimento' && tipo === 'entrada'
                   ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
                   : 'border-app-border hover:border-emerald-200 text-app-text-secondary'
               }`}
@@ -337,9 +402,26 @@ export default function Movimentacoes() {
               <ArrowDownCircle size={22} />
               <div className="text-left">
                 <p className="text-[13px] font-bold">Entrada</p>
-                <p className="text-[11px] opacity-75">Compra, recebimento ou ajuste</p>
+                <p className="text-[11px] opacity-75">Compra ou recebimento</p>
               </div>
             </button>
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setModo('ajuste')}
+                className={`flex items-center gap-3 p-4 rounded-xl border-[1.5px] transition-all cursor-pointer ${
+                  modo === 'ajuste'
+                    ? 'border-amber-400 bg-amber-50 text-amber-700'
+                    : 'border-app-border hover:border-amber-200 text-app-text-secondary'
+                }`}
+              >
+                <Scale size={22} />
+                <div className="text-left">
+                  <p className="text-[13px] font-bold">Ajuste de Contagem</p>
+                  <p className="text-[11px] opacity-75">Reconciliar com a contagem física</p>
+                </div>
+              </button>
+            )}
           </div>
         </div>
 
@@ -407,44 +489,96 @@ export default function Movimentacoes() {
 
         {/* ── Detalhes ── */}
         <div className="card">
-          <SectionHeader number="3" title="Detalhes da Movimentação" />
+          <SectionHeader number="3" title={modo === 'ajuste' ? 'Contagem Física' : 'Detalhes da Movimentação'} />
           <div className="p-6 grid grid-cols-2 gap-4">
-            <div className="flex flex-col gap-1.5">
-              <Label required>Quantidade</Label>
-              <input
-                type="number"
-                step="0.0001"
-                min="0.0001"
-                value={quantidade}
-                onChange={e => setQuantidade(e.target.value)}
-                placeholder="Ex: 3"
-                className={`input-base ${erros.quantidade ? 'border-rose-400' : ''}`}
-              />
-              {erros.quantidade && <span className="text-rose-500 text-[11px]">{erros.quantidade}</span>}
-            </div>
+            {modo === 'ajuste' ? (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label required>Quantidade contada</Label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0"
+                    value={quantidadeContada}
+                    onChange={e => setQuantidadeContada(e.target.value)}
+                    placeholder="Ex: 5"
+                    className={`input-base ${erros.quantidade ? 'border-rose-400' : ''}`}
+                  />
+                  {erros.quantidade && <span className="text-rose-500 text-[11px]">{erros.quantidade}</span>}
+                </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label required>Motivo</Label>
-              <select
-                value={motivoId}
-                onChange={e => setMotivoId(e.target.value)}
-                className="input-base"
-              >
-                {motivosFiltrados.map(m => (
-                  <option key={m.id} value={m.id}>{m.descricao}</option>
-                ))}
-              </select>
-            </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label>Diferença</Label>
+                  <div className="input-base flex items-center bg-app-bg text-[13px] font-bold">
+                    {diferencaAjuste === null ? (
+                      <span className="text-app-text-label font-normal">—</span>
+                    ) : diferencaAjuste === 0 ? (
+                      <span className="text-app-text-secondary font-normal">Sem diferença</span>
+                    ) : diferencaAjuste > 0 ? (
+                      <span className="text-emerald-600">+{diferencaAjuste.toFixed(4)} (gera entrada)</span>
+                    ) : (
+                      <span className="text-rose-600">{diferencaAjuste.toFixed(4)} (gera saída)</span>
+                    )}
+                  </div>
+                </div>
 
-            <div className="flex flex-col gap-1.5">
-              <Label>Data / Hora</Label>
-              <input
-                type="datetime-local"
-                value={data}
-                onChange={e => setData(e.target.value)}
-                className="input-base"
-              />
-            </div>
+                <div className="col-span-2 flex flex-col gap-1.5">
+                  <Label>Motivo</Label>
+                  <p className="text-[12px] text-app-text-secondary">
+                    Ajuste de inventário — lançado automaticamente como entrada ou saída conforme a diferença acima.
+                  </p>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label>Data / Hora</Label>
+                  <input
+                    type="datetime-local"
+                    value={data}
+                    onChange={e => setData(e.target.value)}
+                    className="input-base"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="flex flex-col gap-1.5">
+                  <Label required>Quantidade</Label>
+                  <input
+                    type="number"
+                    step="0.0001"
+                    min="0.0001"
+                    value={quantidade}
+                    onChange={e => setQuantidade(e.target.value)}
+                    placeholder="Ex: 3"
+                    className={`input-base ${erros.quantidade ? 'border-rose-400' : ''}`}
+                  />
+                  {erros.quantidade && <span className="text-rose-500 text-[11px]">{erros.quantidade}</span>}
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label required>Motivo</Label>
+                  <select
+                    value={motivoId}
+                    onChange={e => setMotivoId(e.target.value)}
+                    className="input-base"
+                  >
+                    {motivosFiltrados.map(m => (
+                      <option key={m.id} value={m.id}>{m.descricao}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1.5">
+                  <Label>Data / Hora</Label>
+                  <input
+                    type="datetime-local"
+                    value={data}
+                    onChange={e => setData(e.target.value)}
+                    className="input-base"
+                  />
+                </div>
+              </>
+            )}
           </div>
         </div>
 
@@ -455,15 +589,17 @@ export default function Movimentacoes() {
           </button>
           <button
             type="submit"
-            disabled={loading || !produto}
+            disabled={loading || !produto || (modo === 'ajuste' && diferencaAjuste === 0)}
             className={`btn btn-primary flex items-center gap-2 px-6 py-2.5 text-[13px] ${
-              tipo === 'entrada' ? '' : 'bg-rose-600 hover:opacity-90'
+              modo === 'ajuste' ? 'bg-amber-500 hover:opacity-90' : tipo === 'entrada' ? '' : 'bg-rose-600 hover:opacity-90'
             }`}
           >
-            {loading ? <Spinner /> : tipo === 'entrada'
-              ? <ArrowDownCircle size={15} />
-              : <ArrowUpCircle size={15} />}
-            {loading ? 'Salvando...' : tipo === 'entrada' ? 'Registrar Entrada' : 'Registrar Saída'}
+            {loading ? <Spinner /> : modo === 'ajuste'
+              ? <Scale size={15} />
+              : tipo === 'entrada'
+                ? <ArrowDownCircle size={15} />
+                : <ArrowUpCircle size={15} />}
+            {loading ? 'Salvando...' : modo === 'ajuste' ? 'Registrar Ajuste' : tipo === 'entrada' ? 'Registrar Entrada' : 'Registrar Saída'}
           </button>
         </div>
       </form>
