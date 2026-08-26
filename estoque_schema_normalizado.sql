@@ -171,6 +171,37 @@ create table locais (
 comment on table locais is 'Locais físicos onde o estoque é mantido.';
 
 -- -------------------------------------------------------------
+-- 7.1 USUARIOS_LOCAIS
+--     Quais locais cada usuário acessa e se pode gerenciar.
+--     Admin não entra aqui — fn_is_admin() concede acesso total.
+-- -------------------------------------------------------------
+create table usuarios_locais (
+  usuario_id  uuid        not null,
+  local_id    int         not null,
+  pode_editar boolean     not null default false,
+  criado_em   timestamptz not null default now(),
+  criado_por  uuid,
+
+  constraint usuarios_locais_pk
+    primary key (usuario_id, local_id),
+
+  constraint usuarios_locais_usuario_fk
+    foreign key (usuario_id) references perfis(id) on delete cascade,
+
+  constraint usuarios_locais_local_fk
+    foreign key (local_id) references locais(id) on delete cascade,
+
+  constraint usuarios_locais_criado_por_fk
+    foreign key (criado_por) references perfis(id) on delete set null
+);
+
+create index idx_usuarios_locais_local on usuarios_locais(local_id);
+
+comment on table  usuarios_locais             is 'Quais locais cada usuário acessa e se pode gerenciar o estoque deles. Administradores não precisam de linhas aqui — fn_is_admin() concede acesso total.';
+comment on column usuarios_locais.pode_editar is 'false = somente leitura (visualizador). true = pode movimentar estoque e editar o mínimo neste local.';
+comment on column usuarios_locais.criado_por  is 'Admin que concedeu o acesso. Null quando veio da migração inicial.';
+
+-- -------------------------------------------------------------
 -- 8. ESTOQUES
 --    Combinação apresentação × local; guarda quantidade atual
 -- -------------------------------------------------------------
@@ -345,6 +376,10 @@ left join consumo   co on co.produto_id = s.produto_id
                       and co.local_id   = s.local_id
                       and co.unidade_id = s.unidade_id;
 
+-- security_invoker: sem isto a view roda com a permissão do dono e
+-- ignora o RLS das tabelas-base, devolvendo todos os locais.
+alter view vw_consumo_30_dias set (security_invoker = on);
+
 comment on view vw_consumo_30_dias is
   'Consumo real (excluindo descartes e ajustes de inventário) dos últimos 30 dias, consolidado por produto, local e unidade base. Inclui produtos sem consumo recente.';
 
@@ -369,6 +404,10 @@ select
   )                                        as quantidade_sugerida_compra,
   estoque_minimo_unidade_base              as estoque_minimo
 from vw_consumo_30_dias;
+
+-- security_invoker: sem isto a view roda com a permissão do dono e
+-- ignora o RLS das tabelas-base, devolvendo todos os locais.
+alter view vw_sugestao_compra set (security_invoker = on);
 
 comment on view vw_sugestao_compra is
   'Sugestão de compra = consumo 30 dias + estoque mínimo − estoque atual (nunca negativo).';
@@ -403,6 +442,10 @@ join perfis                   pf on pf.id = m.criado_por
 left join papeis              pa on pa.id = pf.papel_id
 left join motivos_movimentacao mo on mo.id = m.motivo_id
 order by m.data desc;
+
+-- security_invoker: sem isto a view roda com a permissão do dono e
+-- ignora o RLS das tabelas-base, devolvendo todos os locais.
+alter view vw_auditoria_movimentacoes set (security_invoker = on);
 
 comment on view vw_auditoria_movimentacoes is
   'Histórico completo de movimentações com produto, local e usuário responsável.';
@@ -443,6 +486,49 @@ $$;
 comment on function fn_is_admin() is 'Retorna true se o usuário logado é administrador.';
 comment on function fn_is_ativo() is 'Retorna true se o usuário logado está ativo no sistema.';
 
+-- Acesso por local. As três são security definer de propósito: precisam
+-- ler usuarios_locais ignorando o RLS da própria tabela, senão a checagem
+-- entraria em recursão.
+create or replace function fn_pode_ver_local(p_local_id int)
+returns boolean language sql security definer stable as $$
+  select fn_is_ativo() and (
+    fn_is_admin() or exists (
+      select 1 from usuarios_locais
+      where usuario_id = auth.uid()
+        and local_id   = p_local_id
+    )
+  );
+$$;
+
+create or replace function fn_pode_editar_local(p_local_id int)
+returns boolean language sql security definer stable as $$
+  select fn_is_ativo() and (
+    fn_is_admin() or exists (
+      select 1 from usuarios_locais
+      where usuario_id  = auth.uid()
+        and local_id    = p_local_id
+        and pode_editar
+    )
+  );
+$$;
+
+-- produtos e apresentacoes são globais (não têm local_id), então não há
+-- local para checar: a regra é gerenciar estoque em ao menos um lugar.
+create or replace function fn_pode_editar_algum_local()
+returns boolean language sql security definer stable as $$
+  select fn_is_ativo() and (
+    fn_is_admin() or exists (
+      select 1 from usuarios_locais
+      where usuario_id = auth.uid()
+        and pode_editar
+    )
+  );
+$$;
+
+comment on function fn_pode_ver_local(int)        is 'Retorna true se o usuário logado pode visualizar dados do local informado. Exige perfil ativo.';
+comment on function fn_pode_editar_local(int)     is 'Retorna true se o usuário logado pode alterar estoque do local informado.';
+comment on function fn_pode_editar_algum_local()  is 'Retorna true se o usuário logado gerencia estoque em ao menos um local. Usada nas policies de produtos e apresentacoes, que são dados globais sem local_id.';
+
 -- -------------------------------------------------------------
 -- 17. ROW LEVEL SECURITY (RLS)
 -- -------------------------------------------------------------
@@ -456,6 +542,15 @@ alter table apresentacoes        enable row level security;
 alter table locais               enable row level security;
 alter table estoques             enable row level security;
 alter table movimentacoes        enable row level security;
+alter table usuarios_locais      enable row level security;
+
+-- GRANT explícito: as demais tabelas herdaram os privilégios padrão do Supabase
+-- na criação do projeto, mas uma tabela criada depois, por migração, não herda
+-- nada. Sem isto o Postgres barra antes de avaliar o RLS, com
+-- "42501: permission denied for table usuarios_locais". As policies abaixo é que
+-- limitam quais linhas cada usuário enxerga.
+grant select, insert, update, delete
+  on public.usuarios_locais to authenticated;
 
 -- === LEITURA — todos autenticados ===
 create policy "autenticados podem ler papeis"
@@ -479,40 +574,70 @@ create policy "autenticados podem ler produtos"
 create policy "autenticados podem ler apresentacoes"
   on apresentacoes for select to authenticated using (true);
 
-create policy "autenticados podem ler locais"
-  on locais for select to authenticated using (true);
+-- Leitura por local: o seletor da TopBar se filtra sozinho, sem mudar o frontend.
+create policy "usuario le locais permitidos"
+  on locais for select to authenticated
+  using (fn_pode_ver_local(id));
 
-create policy "autenticados podem ler estoques"
-  on estoques for select to authenticated using (true);
+create policy "usuario le estoques dos locais permitidos"
+  on estoques for select to authenticated
+  using (fn_pode_ver_local(local_id));
 
-create policy "autenticados podem ler movimentacoes"
-  on movimentacoes for select to authenticated using (true);
+-- movimentacoes não tem local_id; chega nele via estoques.
+create policy "usuario le movimentacoes dos locais permitidos"
+  on movimentacoes for select to authenticated
+  using (
+    exists (
+      select 1 from estoques e
+      where e.id = estoque_id
+        and fn_pode_ver_local(e.local_id)
+    )
+  );
 
--- === INSERÇÃO — apenas usuários ativos ===
-create policy "ativos podem inserir produtos"
+-- Usuário vê só os próprios acessos; só admin concede ou revoga.
+create policy "usuario ve seus proprios acessos"
+  on usuarios_locais for select to authenticated
+  using (usuario_id = auth.uid() or fn_is_admin());
+
+create policy "admin gerencia acessos"
+  on usuarios_locais for all to authenticated
+  using (fn_is_admin())
+  with check (fn_is_admin());
+
+-- === INSERÇÃO — exige gestão de estoque ===
+-- produtos e apresentacoes são globais: basta gerenciar algum local.
+create policy "gestores podem inserir produtos"
   on produtos for insert to authenticated
-  with check (fn_is_ativo());
+  with check (fn_pode_editar_algum_local());
 
-create policy "ativos podem inserir apresentacoes"
+create policy "gestores podem inserir apresentacoes"
   on apresentacoes for insert to authenticated
-  with check (fn_is_ativo());
+  with check (fn_pode_editar_algum_local());
 
-create policy "ativos podem inserir locais"
+-- Criar local é de admin: quem cria não recebe acesso automático
+-- (nenhuma linha em usuarios_locais), então o local sumiria da tela.
+create policy "admin pode inserir locais"
   on locais for insert to authenticated
-  with check (fn_is_ativo());
+  with check (fn_is_admin());
 
-create policy "ativos podem inserir estoques"
+-- estoques tem local_id, então a checagem é precisa: o gerente da Cozinha
+-- cria o produto globalmente, mas só dá saldo a ele na Cozinha.
+create policy "gestores podem inserir estoques"
   on estoques for insert to authenticated
-  with check (fn_is_ativo());
+  with check (fn_pode_editar_local(local_id));
 
 -- Ajuste de inventário (contagem física) só pode ser lançado por admin —
 -- esse motivo reconcilia o saldo do sistema com a contagem real e pode
 -- mascarar perdas/erros se qualquer usuário puder usá-lo livremente.
-create policy "ativos podem inserir movimentacoes"
+create policy "gestores podem inserir movimentacoes"
   on movimentacoes for insert to authenticated
   with check (
     criado_por = auth.uid()
-    and fn_is_ativo()
+    and exists (
+      select 1 from estoques e
+      where e.id = estoque_id
+        and fn_pode_editar_local(e.local_id)
+    )
     and (
       not exists (
         select 1 from motivos_movimentacao mo
@@ -580,9 +705,10 @@ create policy "admin pode deletar estoques"
   on estoques for delete to authenticated
   using (fn_is_admin());
 
--- Permite ao admin ajustar o estoque_minimo pela interface.
--- (quantidade_atual continua sendo alterada apenas pelo trigger de
--- movimentações; o app não expõe edição direta desse campo)
+-- UPDATE direto em estoques é só de admin, e de propósito: RLS é por linha,
+-- não por coluna, então conceder isto a um gerente daria junto o poder de
+-- reescrever quantidade_atual por fora do histórico de movimentações.
+-- Gerente de local altera o estoque mínimo via fn_define_estoque_minimo (18.2).
 create policy "admin pode atualizar estoques"
   on estoques for update to authenticated
   using (fn_is_admin());
@@ -699,6 +825,51 @@ $$;
 
 comment on function fn_cria_produto_completo(text, int, jsonb) is
   'Cria produto, apresentações, estoques e saldo inicial em uma transação única. Usada pela tela de cadastro de produto.';
+
+-- -------------------------------------------------------------
+-- 18.2 FUNÇÃO RPC — estoque mínimo por gerente de local
+--      Existe para não conceder UPDATE em estoques a não-admins:
+--      estoque_minimo e quantidade_atual moram na mesma linha, e o RLS
+--      do Postgres não separa colunas. Esta função toca em um campo só.
+-- -------------------------------------------------------------
+create or replace function fn_define_estoque_minimo(
+  p_estoque_id int,
+  p_valor      numeric
+)
+returns void
+language plpgsql
+security definer
+as $$
+declare
+  v_local_id int;
+begin
+  select local_id into v_local_id
+    from estoques where id = p_estoque_id;
+
+  if v_local_id is null then
+    raise exception 'Estoque não encontrado.'
+      using errcode = '02000';
+  end if;
+
+  if not fn_pode_editar_local(v_local_id) then
+    raise exception 'Sem permissão para alterar o estoque mínimo deste local.'
+      using errcode = '42501';
+  end if;
+
+  if p_valor is null or p_valor < 0 then
+    raise exception 'Estoque mínimo não pode ser negativo.'
+      using errcode = '23514';
+  end if;
+
+  update estoques
+     set estoque_minimo = p_valor,
+         atualizado_em  = now()
+   where id = p_estoque_id;
+end;
+$$;
+
+comment on function fn_define_estoque_minimo(int, numeric) is
+  'Altera o estoque mínimo de um estoque, se o usuário gerencia o local. Existe para não conceder UPDATE em estoques a não-admins, o que permitiria reescrever quantidade_atual por fora do histórico de movimentações.';
 
 -- -------------------------------------------------------------
 -- 19. DADOS INICIAIS
