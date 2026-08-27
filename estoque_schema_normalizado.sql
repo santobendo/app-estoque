@@ -461,6 +461,14 @@ create index idx_estoques_apresentacao      on estoques(apresentacao_id);
 create index idx_estoques_local             on estoques(local_id);
 create index idx_apresentacoes_produto      on apresentacoes(produto_id);
 create index idx_apresentacoes_unidade      on apresentacoes(unidade_id);
+
+-- Índice funcional, e não constraint, para ignorar caixa e espaços nas pontas:
+-- "Pacote 5kg", "PACOTE 5KG" e "Pacote 5kg " passam a colidir.
+create unique index idx_apresentacoes_descricao_unica
+  on apresentacoes (produto_id, lower(trim(descricao)));
+
+comment on index idx_apresentacoes_descricao_unica is
+  'Impede duas apresentações com a mesma descrição no mesmo produto, ignorando caixa e espaços nas pontas.';
 create index idx_perfis_papel               on perfis(papel_id);
 create index idx_produtos_categoria         on produtos(categoria_id);
 
@@ -784,10 +792,15 @@ declare
   v_loc           jsonb;
   v_estoque_id    int;
   v_qtd           numeric;
-  v_motivo_ajuste int;
+  v_motivo_saldo  int;
 begin
-  select id into v_motivo_ajuste
-    from motivos_movimentacao where codigo = 'ajuste';
+  select id into v_motivo_saldo
+    from motivos_movimentacao where codigo = 'saldo_inicial';
+
+  if v_motivo_saldo is null then
+    raise exception 'Motivo "saldo_inicial" não cadastrado.'
+      using errcode = '23503';
+  end if;
 
   insert into produtos (nome, categoria_id, criado_por)
   values (upper(trim(p_nome)), p_categoria_id, auth.uid())
@@ -809,12 +822,13 @@ begin
       values (v_ap_id, (v_loc->>'local_id')::int)
       returning id into v_estoque_id;
 
-      -- Saldo inicial entra como movimentação de ajuste,
-      -- preservando o histórico (o trigger atualiza o saldo).
+      -- Saldo inicial entra como movimentação própria, preservando o
+      -- histórico (o trigger atualiza o saldo). Motivo separado de 'ajuste',
+      -- que é reconciliação de contagem física e é restrito a admin.
       v_qtd := coalesce((v_loc->>'quantidade_inicial')::numeric, 0);
       if v_qtd > 0 then
         insert into movimentacoes (estoque_id, criado_por, tipo, quantidade, motivo_id)
-        values (v_estoque_id, auth.uid(), 'entrada', v_qtd, v_motivo_ajuste);
+        values (v_estoque_id, auth.uid(), 'entrada', v_qtd, v_motivo_saldo);
       end if;
     end loop;
   end loop;
@@ -872,6 +886,106 @@ comment on function fn_define_estoque_minimo(int, numeric) is
   'Altera o estoque mínimo de um estoque, se o usuário gerencia o local. Existe para não conceder UPDATE em estoques a não-admins, o que permitiria reescrever quantidade_atual por fora do histórico de movimentações.';
 
 -- -------------------------------------------------------------
+-- 18.3 FUNÇÃO RPC — apresentações em produto que já existe
+--      Irmã de 18.1, para o outro caminho da busca-antes-de-criar:
+--      o usuário achou o produto no catálogo global e quer mantê-lo
+--      no seu local. Uma função = uma transação; fazer isso em três
+--      chamadas do cliente deixaria apresentação sem estoque se a
+--      segunda falhasse.
+--
+--      p_apresentacoes (jsonb): cada item é uma apresentação já
+--      existente (tem "id") ou nova (descricao/quantidade_unitaria/
+--      unidade_id). Os dois formatos convivem no mesmo array.
+-- -------------------------------------------------------------
+create or replace function fn_adiciona_apresentacoes_produto(
+  p_produto_id    int,
+  p_apresentacoes jsonb
+)
+returns int
+language plpgsql
+security invoker
+as $$
+declare
+  v_produto_nome text;
+  v_ap           jsonb;
+  v_ap_id        int;
+  v_loc          jsonb;
+  v_estoque_id   int;
+  v_qtd          numeric;
+  v_motivo_saldo int;
+begin
+  select id into v_motivo_saldo
+    from motivos_movimentacao where codigo = 'saldo_inicial';
+
+  if v_motivo_saldo is null then
+    raise exception 'Motivo "saldo_inicial" não cadastrado.'
+      using errcode = '23503';
+  end if;
+
+  select nome into v_produto_nome
+    from produtos where id = p_produto_id;
+
+  if v_produto_nome is null then
+    raise exception 'Produto não encontrado.'
+      using errcode = '02000';
+  end if;
+
+  for v_ap in select * from jsonb_array_elements(coalesce(p_apresentacoes, '[]'::jsonb)) loop
+
+    if (v_ap->>'id') is not null then
+      -- Apresentação que já existe. Confere que ela pertence mesmo ao produto
+      -- informado — sem isso, um id arbitrário vindo do cliente permitiria
+      -- pendurar estoque na apresentação de outro produto.
+      select id into v_ap_id
+        from apresentacoes
+       where id = (v_ap->>'id')::int
+         and produto_id = p_produto_id;
+
+      if v_ap_id is null then
+        raise exception 'Apresentação % não pertence ao produto "%".',
+          v_ap->>'id', v_produto_nome
+          using errcode = '23503';
+      end if;
+
+    else
+      insert into apresentacoes (produto_id, descricao, quantidade_unitaria, unidade_id, criado_por)
+      values (
+        p_produto_id,
+        coalesce(nullif(trim(v_ap->>'descricao'), ''), v_produto_nome),
+        (v_ap->>'quantidade_unitaria')::numeric,
+        (v_ap->>'unidade_id')::int,
+        auth.uid()
+      )
+      returning id into v_ap_id;
+    end if;
+
+    for v_loc in select * from jsonb_array_elements(coalesce(v_ap->'locais', '[]'::jsonb)) loop
+      insert into estoques (apresentacao_id, local_id)
+      values (v_ap_id, (v_loc->>'local_id')::int)
+      on conflict (apresentacao_id, local_id) do nothing
+      returning id into v_estoque_id;
+
+      -- Vínculo que já existia devolve nada, e v_estoque_id fica nulo. Nesse caso
+      -- não se lança movimentação: somar saldo a um vínculo preexistente seria
+      -- inflar estoque silenciosamente se o usuário reenviar o formulário.
+      if v_estoque_id is not null then
+        v_qtd := coalesce((v_loc->>'quantidade_inicial')::numeric, 0);
+        if v_qtd > 0 then
+          insert into movimentacoes (estoque_id, criado_por, tipo, quantidade, motivo_id)
+          values (v_estoque_id, auth.uid(), 'entrada', v_qtd, v_motivo_saldo);
+        end if;
+      end if;
+    end loop;
+  end loop;
+
+  return p_produto_id;
+end;
+$$;
+
+comment on function fn_adiciona_apresentacoes_produto(int, jsonb) is
+  'Adiciona apresentações (novas ou já existentes) e seus estoques a um produto que já existe, em transação única. Usada pela busca-antes-de-criar da tela de cadastro de produto.';
+
+-- -------------------------------------------------------------
 -- 19. DADOS INICIAIS
 -- -------------------------------------------------------------
 
@@ -900,7 +1014,11 @@ insert into motivos_movimentacao (codigo, descricao) values
   ('descarte', 'Item descartado por validade, dano ou inutilidade'),
   ('compra',   'Entrada por compra ou recebimento'),
   ('ajuste',   'Ajuste de inventário'),
-  ('outro',    'Outro motivo não categorizado');
+  ('outro',    'Outro motivo não categorizado'),
+  -- Separado de 'ajuste' de propósito: 'ajuste' é reconciliação de contagem
+  -- física e é restrito a admin (ver policy em 17). Sem este motivo próprio,
+  -- não-admin não conseguiria cadastrar produto com saldo inicial > 0.
+  ('saldo_inicial', 'Saldo inicial do cadastro');
 
 insert into locais (nome, descricao) values
   ('Almoxarifado', 'Depósito principal'),
