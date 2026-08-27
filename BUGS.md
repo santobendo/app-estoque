@@ -124,13 +124,20 @@ create policy "admin pode atualizar estoques"
 
 *(Os antigos itens A, B e C foram corrigidos — ver itens 11–13 acima.)*
 
-### D. Usuário desativado ainda LÊ dados pela API
-As policies de SELECT exigem só `authenticated`, sem checar `fn_is_ativo()`.
-A tela "Conta desativada" resolve o uso normal, mas alguém com o token
-poderia consultar a API diretamente. **Sugestão:** banir via
-`supabase.auth.admin.updateUserById(id, { ban_duration: '876000h' })` numa
-Edge Function quando desativar (a nota no fim do schema já descreve), ou
-trocar as policies de SELECT para `using (fn_is_ativo())`.
+### D. Usuário desativado ainda LÊ dados pela API — **RESOLVIDO em 26/08/2026**
+As policies de SELECT exigiam só `authenticated`, sem checar `fn_is_ativo()`.
+A tela "Conta desativada" cobria o uso normal, mas alguém com o token podia
+consultar a API diretamente.
+
+Resolvido pela refatoração de acesso por local (`migracoes/02_...md`):
+`locais`, `estoques` e `movimentacoes` passaram a filtrar por
+`fn_pode_ver_local()`, que exige `fn_is_ativo()`. As três views ganharam
+`security_invoker = on`, então também param de vazar.
+
+Continuam legíveis por qualquer autenticado, inclusive inativo: `produtos`,
+`apresentacoes`, `categorias`, `unidades`, `motivos_movimentacao`, `papeis`
+e `perfis` — dados mestres sem quantidade nem local, mantidos abertos de
+propósito (a busca-antes-de-criar do cadastro de produto depende disso).
 
 ### E. Variáveis de ambiente sem validação
 `supabaseClient.js` não valida `VITE_SUPABASE_URL` / `VITE_SUPABASE_KEY` —
