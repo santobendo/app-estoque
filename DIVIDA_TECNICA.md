@@ -1,8 +1,7 @@
-# Dívida técnica
+# Dívida técnica — lint
 
-Duas partes, ambas para depois que a refatoração de acesso por local terminar:
-as seções **1 a 4** são o que o `npx eslint src` acusa; a seção **5** é um
-problema de produto que decidimos adiar conscientemente.
+Registro do que o `npx eslint src` acusa hoje, para limpar de uma vez depois que
+a refatoração de acesso por local terminar.
 
 **Estado em 27/08/2026:** 18 erros e 1 aviso, em 10 arquivos.
 Nenhum quebra o build — `npx vite build` passa limpo.
@@ -101,38 +100,3 @@ nenhuma outra situação.
 
 Se for silenciar, use `// eslint-disable-next-line react-hooks/exhaustive-deps` com
 o motivo escrito ao lado — **não** adicione as dependências.
-
----
-
-## 5. UX — a ação de vincular está escondida atrás da de criar
-
-**Onde:** `src/pages/ProdutoDetalhe.jsx`, cartão "Apresentações".
-**Adiado em 27/08/2026**, com o problema entendido e a correção desenhada.
-
-Quando um produto ainda não é mantido no local do usuário, a ação útil é
-*vincular uma apresentação que já existe* ao local dele. A tela oferece o
-contrário:
-
-| Ação | Frequência real | Peso na tela hoje |
-|---|---|---|
-| Vincular apresentação existente a um local | comum | `<select>` pequeno dentro de cada linha, rótulo "+ Vincular local…" |
-| Criar apresentação nova | rara | botão primário no topo do cartão |
-
-**O risco concreto:** o gerente abre ARROZ no Almoxarifado, quer estocar o
-"Pacote 5kg" que já existe na Cozinha, não repara no select, clica no botão
-grande e digita "Pacote 5kg" de novo. O `idx_apresentacoes_descricao_unica`
-(migração 03) barra com `23505` — ou seja, ele é protegido do estrago por uma
-mensagem de erro, não por um caminho. É a mesma duplicação que a
-busca-antes-de-criar existe para evitar, travada no último metro.
-
-**Correção desenhada:** quando o produto não tem nenhuma apresentação vinculada
-ao local atual, abrir o cartão com um bloco de destaque —
-*"ARROZ ainda não é mantido em Almoxarifado. Escolha quais embalagens estocar
-aqui:"* — listando as apresentações existentes em caixas de seleção, com um
-botão "Estocar em Almoxarifado". "Criar apresentação nova" vira link
-secundário abaixo ("Nenhuma serve? Criar apresentação nova").
-
-É o mesmo desenho da busca-antes-de-criar do `CadastroProduto`, aplicado onde o
-usuário de fato cai. **Não precisa de SQL:** a
-`fn_adiciona_apresentacoes_produto` (migração 04) já aceita apresentações
-existentes por `id`, que é exatamente esse caso.

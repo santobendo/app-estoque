@@ -33,6 +33,7 @@ export default function ProdutoDetalhe() {
   const [salvando, setSalvando]       = useState(false);
   const [confirmacao, setConfirmacao] = useState(null);  // { mensagem, onConfirm }
   const [editMin, setEditMin]         = useState(null);  // { estoqueId, valor }
+  const [aEstocar, setAEstocar]       = useState([]);     // ids de apresentacao
 
   const fetch = useCallback(async () => {
     setLoading(true);
@@ -195,6 +196,38 @@ export default function ProdutoDetalhe() {
   const podeEditarLocal = (localId) =>
     locais.find(l => l.id === localId)?.pode_editar === true;
 
+  /* Apresentações que ainda não têm estoque no local da barra. Se TODAS
+     estiverem aqui, o produto simplesmente não é mantido neste local — e a
+     ação que o usuário quer é vincular uma que já existe, não inventar
+     outra. Ver DIVIDA_TECNICA.md, seção 5. */
+  const apsForaDoLocalAtual = (produto?.apresentacoes ?? []).filter(
+    ap => !ap.estoques.some(e => e.local_id === localAtual?.id)
+  );
+  const produtoEstaNoLocalAtual =
+    (produto?.apresentacoes ?? []).length > apsForaDoLocalAtual.length;
+
+  const estocarAqui = async () => {
+    /* Filtra contra a lista atual: se o usuário marcou embalagens e depois
+       trocou de local na barra, as marcas antigas não valem mais. */
+    const ids = aEstocar.filter(apId => apsForaDoLocalAtual.some(ap => ap.id === apId));
+    if (ids.length === 0) {
+      setErro('Selecione ao menos uma embalagem para estocar aqui.');
+      return;
+    }
+    setSalvando(true); setErro(null);
+    const { error } = await supabase.rpc('fn_adiciona_apresentacoes_produto', {
+      p_produto_id: Number(id),
+      p_apresentacoes: ids.map(apId => ({
+        id: apId,
+        locais: [{ local_id: localAtual.id, quantidade_inicial: 0 }],
+      })),
+    });
+    setSalvando(false);
+    if (error) { setErro(error.message || traduzErro(error)); return; }
+    setAEstocar([]);
+    fetch();
+  };
+
   /* ─── Vínculos com locais (estoques) ─── */
   const vincularLocal = async (apId, localId) => {
     if (!localId) return;
@@ -253,6 +286,12 @@ export default function ProdutoDetalhe() {
   /* A apresentação nasce já vinculada ao local da barra superior. Sem isso
      ela ficaria sem local nenhum — invisível no catálogo, inclusive para
      admin — que é justamente o buraco que a busca-antes-de-criar fecha. */
+  /* O bloco de "estocar aqui" só faz sentido quando o produto inteiro está
+     fora do local: se ao menos uma embalagem já está aqui, o usuário já se
+     orientou e o "+ Estocar em…" de cada linha basta. */
+  const mostraEstocar =
+    podeEditarAtual && !novaAp && !produtoEstaNoLocalAtual && apsForaDoLocalAtual.length > 0;
+
   const emptyNovaAp = () => ({
     descricao: '',
     quantidade_unitaria: '',
@@ -349,7 +388,7 @@ export default function ProdutoDetalhe() {
           </div>
           {/* O local vai no rótulo porque a lista abaixo mostra todos os locais:
               sem ele, nada na tela diz onde a apresentação vai parar. */}
-          {podeEditarAtual && (
+          {podeEditarAtual && !mostraEstocar && (
             <button
               onClick={() => { setNovaAp(emptyNovaAp()); setEditAp(null); }}
               disabled={!!novaAp}
@@ -361,6 +400,76 @@ export default function ProdutoDetalhe() {
         </div>
 
         <div className="divide-y divide-app-border-inner">
+          {/* Vincular embalagem existente ao local atual. Vem antes de tudo e
+              leva o botão primário porque é a ação que o usuário quer quando
+              cai aqui; criar embalagem nova é a exceção e virou link. */}
+          {mostraEstocar && (
+            <div className="p-6 bg-app-bg/50 flex flex-col gap-4">
+              <div>
+                <p className="text-[14px] font-bold text-app-text">
+                  {produto.nome} ainda não é mantido em {localAtual.nome}.
+                </p>
+                <p className="text-[12px] text-app-text-secondary mt-0.5">
+                  Escolha quais embalagens estocar aqui — elas já existem, não
+                  precisam ser cadastradas de novo.
+                </p>
+              </div>
+
+              <div className="flex flex-col gap-2">
+                {apsForaDoLocalAtual.map(ap => {
+                  const marcada = aEstocar.includes(ap.id);
+                  const onde = ap.estoques.map(e => e.locais?.nome).filter(Boolean);
+                  return (
+                    <button
+                      key={ap.id}
+                      type="button"
+                      onClick={() => setAEstocar(p =>
+                        marcada ? p.filter(x => x !== ap.id) : [...p, ap.id]
+                      )}
+                      className={`flex items-center gap-3 rounded-xl border-[1.5px] px-4 py-3 text-left transition-all ${
+                        marcada
+                          ? 'border-app-text bg-white'
+                          : 'border-app-border bg-white/60 hover:border-app-text-label'
+                      }`}
+                    >
+                      <span className={`w-4 h-4 rounded flex items-center justify-center shrink-0 border-[1.5px] ${
+                        marcada
+                          ? 'bg-app-text border-app-text text-white'
+                          : 'border-app-border-dashed'
+                      }`}>
+                        {marcada && <Check size={11} />}
+                      </span>
+                      <span className="flex-1">
+                        <span className="block text-[13px] font-bold text-app-text">{ap.descricao}</span>
+                        <span className="block text-[11px] text-app-text-secondary">
+                          1 embalagem = {Number(ap.quantidade_unitaria)} {ap.unidades?.sigla}
+                          {onde.length > 0 && ` · já em ${onde.join(', ')}`}
+                        </span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => { setNovaAp(emptyNovaAp()); setEditAp(null); setAEstocar([]); }}
+                  className="text-[12px] text-app-text-secondary hover:text-app-text underline decoration-dotted underline-offset-2"
+                >
+                  Nenhuma serve? Criar apresentação nova
+                </button>
+                <button
+                  onClick={estocarAqui}
+                  disabled={salvando || aEstocar.length === 0}
+                  className="btn btn-primary flex items-center gap-1.5 px-4 py-2 text-[12px]"
+                >
+                  {salvando ? <Spinner /> : <Plus size={13} />} Estocar em {localAtual.nome}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Formulário de nova apresentação. Some se o usuário trocar para um
               local que só visualiza — deixá-lo aberto manteria em tela um
               formulário que o banco recusaria no fim. */}
@@ -607,7 +716,7 @@ export default function ProdutoDetalhe() {
                         onChange={e => vincularLocal(ap.id, e.target.value)}
                         className="input-base py-1.5 text-[12px] text-app-text-secondary w-auto"
                       >
-                        <option value="" disabled>+ Vincular local…</option>
+                        <option value="" disabled>+ Estocar em…</option>
                         {locaisDisponiveis.map(l => (
                           <option key={l.id} value={l.id}>{l.nome}</option>
                         ))}
