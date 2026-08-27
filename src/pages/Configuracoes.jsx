@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import {
   Shield, ShieldOff, UserCheck, UserX, AlertCircle, X,
   Plus, Eye, EyeOff, UserPlus, Info, AtSign, Pencil,
+  MapPin, Minus, SlidersHorizontal, TriangleAlert,
 } from 'lucide-react';
 import TabelaCrud, { ConfirmDialog, Spinner, traduzErro } from '../components/TabelaCrud';
 
@@ -661,12 +662,252 @@ function AbaUsuarios({ papeis }) {
   );
 }
 
+/* ─────────────────────────────────────────────
+   Aba Acessos — matriz usuários × locais
+
+   A matriz responde as duas perguntas do admin ao mesmo tempo: lendo a
+   linha, o que aquele usuário alcança; lendo a coluna, quem alcança
+   aquele local. Uma lista por usuário só responderia a primeira.
+
+   Cada célula cicla em três estados a cada clique — mesmo padrão dos
+   badges de Admin e Ativo da aba Usuários.
+───────────────────────────────────────────── */
+const NIVEIS = {
+  nenhum:    { proximo: 'visualiza', rotulo: 'Sem acesso' },
+  visualiza: { proximo: 'gerencia',  rotulo: 'Visualiza'  },
+  gerencia:  { proximo: 'nenhum',    rotulo: 'Gerencia'   },
+};
+
+const chaveAcesso = (usuarioId, localId) => usuarioId + ':' + localId;
+
+function CelulaAcesso({ nivel, desabilitada, onClick }) {
+  if (desabilitada) {
+    return (
+      <div
+        className="flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-md badge badge-violet text-[11px] font-bold uppercase tracking-wide"
+        title="Administradores acessam todos os locais — não precisam de concessão."
+      >
+        <Shield size={11} /> Total
+      </div>
+    );
+  }
+
+  const estilos = {
+    nenhum:    'bg-app-bg text-app-text-label hover:text-app-text',
+    visualiza: 'badge badge-sky',
+    gerencia:  'badge badge-emerald',
+  };
+  const icones = {
+    nenhum:    <Minus size={11} />,
+    visualiza: <Eye size={11} />,
+    gerencia:  <SlidersHorizontal size={11} />,
+  };
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Clique para alterar o nível de acesso"
+      className={`w-full flex items-center justify-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wide transition-all cursor-pointer ${estilos[nivel]}`}
+    >
+      {icones[nivel]} {NIVEIS[nivel].rotulo}
+    </button>
+  );
+}
+
+function AbaAcessos() {
+  const { user: currentUser } = useAuth();
+  const [perfis, setPerfis]   = useState([]);
+  const [locais, setLocais]   = useState([]);
+  const [acessos, setAcessos] = useState(new Map());   // "usuario:local" -> pode_editar
+  const [loading, setLoading] = useState(true);
+  const [erro, setErro]       = useState(null);
+
+  /* Sem setLoading(true) aqui de propósito: 'loading' já nasce true para a
+     carga inicial, e o refetch que segue um erro atualiza a matriz no lugar,
+     sem piscar o "Carregando..." por cima de uma grade que já está na tela. */
+  const fetch = useCallback(async () => {
+    const [{ data: pfs }, { data: locs }, { data: uls }] = await Promise.all([
+      supabase.from('perfis').select('id, nome, is_admin, ativo, papeis(nome)').order('nome'),
+      supabase.from('locais').select('id, nome, ativo').order('nome'),
+      supabase.from('usuarios_locais').select('usuario_id, local_id, pode_editar'),
+    ]);
+    setPerfis(pfs ?? []);
+    setLocais(locs ?? []);
+    setAcessos(new Map((uls ?? []).map(a => [chaveAcesso(a.usuario_id, a.local_id), a.pode_editar])));
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetch(); }, [fetch]);
+
+  const nivelDe = (usuarioId, localId) => {
+    const podeEditar = acessos.get(chaveAcesso(usuarioId, localId));
+    if (podeEditar === undefined) return 'nenhum';
+    return podeEditar ? 'gerencia' : 'visualiza';
+  };
+
+  /* Aplica na tela antes da resposta do servidor: com vários cliques seguidos,
+     esperar o round-trip a cada célula deixaria a matriz lenta de usar.
+     Se o servidor recusar, o erro aparece e o fetch devolve o estado real. */
+  const alterarAcesso = async (usuario, local) => {
+    const nivelNovo = NIVEIS[nivelDe(usuario.id, local.id)].proximo;
+    const k = chaveAcesso(usuario.id, local.id);
+
+    setErro(null);
+    setAcessos(prev => {
+      const m = new Map(prev);
+      if (nivelNovo === 'nenhum') m.delete(k);
+      else m.set(k, nivelNovo === 'gerencia');
+      return m;
+    });
+
+    const { error } = nivelNovo === 'nenhum'
+      ? await supabase.from('usuarios_locais').delete()
+          .eq('usuario_id', usuario.id).eq('local_id', local.id)
+      : await supabase.from('usuarios_locais').upsert({
+          usuario_id:  usuario.id,
+          local_id:    local.id,
+          pode_editar: nivelNovo === 'gerencia',
+          criado_por:  currentUser?.id ?? null,
+        }, { onConflict: 'usuario_id,local_id' });
+
+    if (error) { setErro(traduzErro(error)); fetch(); }
+  };
+
+  const comuns = useMemo(() => perfis.filter(p => !p.is_admin), [perfis]);
+
+  /* Local sem nenhum usuário comum: só administradores enxergam o estoque dele. */
+  const locaisOrfaos = useMemo(() => new Set(
+    locais
+      .filter(l => !comuns.some(u => acessos.has(chaveAcesso(u.id, l.id))))
+      .map(l => l.id)
+  ), [locais, comuns, acessos]);
+
+  /* Usuário comum sem local nenhum: entra no sistema e não vê nada. */
+  const semAcesso = (u) => !u.is_admin && !locais.some(l => acessos.has(chaveAcesso(u.id, l.id)));
+
+  const totalSemAcesso = comuns.filter(u => u.ativo && semAcesso(u)).length;
+
+  if (loading) {
+    return <p className="text-[13px] text-app-text-secondary py-8 text-center">Carregando...</p>;
+  }
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="rounded-lg bg-app-bg border border-app-border-inner px-3.5 py-2.5 text-[11.5px] text-app-text-secondary leading-relaxed flex items-start gap-2">
+        <Info size={13} className="shrink-0 mt-0.5" />
+        <span>
+          Clique numa célula para alternar entre <span className="font-semibold">Sem acesso</span>,{' '}
+          <span className="font-semibold">Visualiza</span> (só leitura) e{' '}
+          <span className="font-semibold">Gerencia</span> (movimenta estoque e edita o mínimo).
+          Administradores acessam todos os locais e não aparecem para edição.
+        </span>
+      </div>
+
+      {totalSemAcesso > 0 && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-800 rounded-lg px-3.5 py-2.5 text-[12px]">
+          <TriangleAlert size={14} className="shrink-0 mt-0.5" />
+          <span>
+            {totalSemAcesso === 1
+              ? '1 usuário ativo não tem acesso a nenhum local'
+              : `${totalSemAcesso} usuários ativos não têm acesso a nenhum local`}
+            {' '}— eles conseguem entrar no sistema, mas não enxergam estoque nenhum.
+          </span>
+        </div>
+      )}
+
+      {erro && (
+        <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-2.5 text-[13px]">
+          <AlertCircle size={15} className="shrink-0" />
+          <span className="flex-1">{erro}</span>
+          <button onClick={() => setErro(null)} className="p-1 hover:text-rose-900"><X size={14} /></button>
+        </div>
+      )}
+
+      {locais.length === 0 ? (
+        <p className="text-[13px] text-app-text-secondary py-8 text-center">
+          Nenhum local cadastrado.
+        </p>
+      ) : (
+        <div className="table-wrapper overflow-x-auto">
+          <table className="table-clean">
+            <thead>
+              <tr>
+                <th className="sticky left-0 bg-white z-10 min-w-[180px]">Usuário</th>
+                {locais.map(l => (
+                  <th key={l.id} className="min-w-[130px]">
+                    <div className="flex items-center gap-1.5">
+                      <MapPin size={11} className="text-app-text-label shrink-0" />
+                      <span className={l.ativo ? '' : 'line-through opacity-60'}>{l.nome}</span>
+                      {locaisOrfaos.has(l.id) && (
+                        <TriangleAlert
+                          size={12}
+                          className="text-amber-500 shrink-0"
+                          title="Nenhum usuário comum tem acesso a este local — só administradores enxergam o estoque dele."
+                        />
+                      )}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {perfis.length === 0 ? (
+                <tr>
+                  <td colSpan={locais.length + 1} className="text-center py-8 text-app-text-secondary text-[13px]">
+                    Nenhum usuário cadastrado.
+                  </td>
+                </tr>
+              ) : perfis.map(u => (
+                <tr key={u.id} className={!u.ativo ? 'opacity-60 bg-gray-50/35' : ''}>
+                  <td className="sticky left-0 bg-white z-10">
+                    <div className="flex items-center gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-semibold text-[13px] truncate">{u.nome}</p>
+                        <p className="text-[10px] text-app-text-label uppercase tracking-wide">
+                          {u.is_admin ? 'Administrador' : (u.papeis?.nome ?? 'Sem papel')}
+                          {!u.ativo && ' · inativo'}
+                        </p>
+                      </div>
+                      {u.ativo && semAcesso(u) && (
+                        <TriangleAlert
+                          size={13}
+                          className="text-amber-500 shrink-0"
+                          title="Sem acesso a nenhum local — este usuário não enxerga estoque nenhum."
+                        />
+                      )}
+                    </div>
+                  </td>
+                  {locais.map(l => (
+                    <td key={l.id}>
+                      <CelulaAcesso
+                        nivel={nivelDe(u.id, l.id)}
+                        desabilitada={u.is_admin}
+                        onClick={() => alterarAcesso(u, l)}
+                      />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <p className="text-[11px] text-app-text-label">
+        Usuário inativo não enxerga nada, mesmo com acesso concedido aqui — o
+        status em <span className="font-semibold">Usuários</span> vem antes destas regras.
+      </p>
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════
    Página principal
    Obs: Categorias, Unidades e Locais migraram
    para o menu Cadastros (/cadastros).
 ═══════════════════════════════════════════ */
-const ABAS = ['Usuários', 'Papéis'];
+const ABAS = ['Usuários', 'Acessos', 'Papéis'];
 
 export default function Configuracoes() {
   const { isAdmin } = useAuth();
@@ -691,7 +932,7 @@ export default function Configuracoes() {
     <div className="flex flex-col gap-5">
       <header>
         <h1 className="text-2xl mb-0.5">Configurações</h1>
-        <p className="text-[13px] text-app-text-secondary">Gerencie usuários e papéis do sistema.</p>
+        <p className="text-[13px] text-app-text-secondary">Gerencie usuários, acessos por local e papéis do sistema.</p>
       </header>
 
       {/* Abas */}
@@ -713,6 +954,7 @@ export default function Configuracoes() {
 
       {/* Conteúdo */}
       {abaAtiva === 'Usuários' && <AbaUsuarios papeis={papeis} />}
+      {abaAtiva === 'Acessos' && <AbaAcessos />}
       {abaAtiva === 'Papéis' && (
         <TabelaCrud
           tabela="papeis"

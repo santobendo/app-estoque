@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import {
   Plus, Trash2, CheckCircle, ChevronLeft, Package, MapPin,
-  AlertCircle, X, Search, CornerDownLeft,
+  AlertCircle, X, Search, CornerDownLeft, Eye,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useLocal } from '../contexts/LocalContext';
@@ -79,12 +79,21 @@ const emptyApresentacao = (unidades = [], localAtual = null) => ({
 
 export default function CadastroProduto() {
   const navigate = useNavigate();
-  const { localAtual } = useLocal();
+  const { localAtual, locais: locaisContexto, podeEditarAtual, podeEditarAlgum, loadingLocal } = useLocal();
+
+  /* Só os locais que o usuário gerencia: vincular apresentação a um local é
+     um INSERT em estoques, que o RLS recusa fora deles. Oferecer os demais
+     na tela só produziria um erro no fim do preenchimento. */
+  const locais = useMemo(
+    () => locaisContexto.filter(l => l.pode_editar),
+    [locaisContexto]
+  );
+  /* Idem para a pré-seleção do local da barra superior. */
+  const localPadrao = podeEditarAtual ? localAtual : null;
 
   /* ── Dados mestres ── */
   const [categorias, setCategorias] = useState([]);
   const [unidades, setUnidades]     = useState([]);
-  const [locais, setLocais]         = useState([]);
   const [catalogo, setCatalogo]     = useState([]);
   const [loadingDados, setLoadingDados] = useState(true);
 
@@ -111,11 +120,10 @@ export default function CadastroProduto() {
   /* ────────────────────────────────────────── */
   useEffect(() => {
     async function fetchDados() {
-      const [{ data: cats }, { data: units }, { data: locs }, { data: prods }] =
+      const [{ data: cats }, { data: units }, { data: prods }] =
         await Promise.all([
           supabase.from('categorias').select('id, nome').order('nome'),
           supabase.from('unidades').select('id, sigla, nome').order('sigla'),
-          supabase.from('locais').select('id, nome').eq('ativo', true).order('nome'),
           /* Catálogo global — de propósito não filtra por local. É o que permite
              ver que um produto já existe em outro estoque antes de duplicá-lo.
              O aninhamento "estoques" respeita o RLS: só vêm os locais visíveis. */
@@ -138,7 +146,6 @@ export default function CadastroProduto() {
         setUnidades(units);
         setApresentacoes([emptyApresentacao(units)]);
       }
-      if (locs)  setLocais(locs);
       if (prods) setCatalogo(prods);
       setLoadingDados(false);
     }
@@ -148,15 +155,15 @@ export default function CadastroProduto() {
   /* ── Pré-seleciona o local da barra superior nas apresentações sem local ──
      Depende de loadingDados porque fetchDados recria a apresentação inicial. */
   useEffect(() => {
-    if (!localAtual || loadingDados || produtoSel) return;
+    if (!localPadrao || loadingDados || produtoSel) return;
     setApresentacoes(prev =>
       prev.map(a =>
         a.locais.length === 0
-          ? { ...a, locais: [{ local_id: localAtual.id, quantidade_inicial: '0' }] }
+          ? { ...a, locais: [{ local_id: localPadrao.id, quantidade_inicial: '0' }] }
           : a
       )
     );
-  }, [localAtual, loadingDados, produtoSel]);
+  }, [localPadrao, loadingDados, produtoSel]);
 
   /* ── Fecha o painel de sugestões ao clicar fora ── */
   useEffect(() => {
@@ -223,7 +230,7 @@ export default function CadastroProduto() {
   const voltarParaNovo = () => {
     setProdutoSel(null);
     setApsExistentes([]);
-    setApresentacoes([emptyApresentacao(unidades, localAtual)]);
+    setApresentacoes([emptyApresentacao(unidades, localPadrao)]);
     setErros({});
     setErroSubmit(null);
     setBuscaAberta(true);
@@ -236,7 +243,7 @@ export default function CadastroProduto() {
     );
 
   const addApresentacao = () =>
-    setApresentacoes(prev => [...prev, emptyApresentacao(unidades, localAtual)]);
+    setApresentacoes(prev => [...prev, emptyApresentacao(unidades, localPadrao)]);
 
   const removeApresentacao = (index) =>
     setApresentacoes(prev => prev.filter((_, i) => i !== index));
@@ -277,8 +284,8 @@ export default function CadastroProduto() {
         // Ao marcar, já sugere o local da barra superior — desde que ele
         // ainda não tenha essa apresentação vinculada.
         const jaVinculados = new Set((a.estoques ?? []).map(e => e.local_id));
-        const sugerido = localAtual && !jaVinculados.has(localAtual.id)
-          ? [{ local_id: localAtual.id, quantidade_inicial: '0' }]
+        const sugerido = localPadrao && !jaVinculados.has(localPadrao.id)
+          ? [{ local_id: localPadrao.id, quantidade_inicial: '0' }]
           : [];
         return { ...a, selecionada: true, locais: sugerido };
       })
@@ -409,11 +416,47 @@ export default function CadastroProduto() {
     setCategoriaId('');
     setProdutoSel(null);
     setApsExistentes([]);
-    setApresentacoes([emptyApresentacao(unidades, localAtual)]);
+    setApresentacoes([emptyApresentacao(unidades, localPadrao)]);
     setErros({});
     setErroSubmit(null);
     setSuccess(false);
   };
+
+  /* A rota é acessível por URL, então o bloqueio mora aqui e não só no botão
+     do Catálogo. E ele segue o local da barra, não "gerencia algum local":
+     cadastrar a partir de um local que se apenas visualiza jogaria o produto
+     em outro estoque, sem o usuário perceber. */
+  if (!loadingLocal && !podeEditarAtual) {
+    return (
+      <div className="flex flex-col gap-5">
+        <header className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="p-1.5 rounded-lg hover:bg-app-border/60 text-app-text-secondary hover:text-app-text transition-all"
+          >
+            <ChevronLeft size={20} />
+          </button>
+          <h1 className="text-2xl mb-0">Novo Produto</h1>
+        </header>
+        <div className="card p-8 flex flex-col items-center text-center gap-3">
+          <div className="w-11 h-11 rounded-full bg-app-bg flex items-center justify-center text-app-text-label">
+            <Eye size={20} />
+          </div>
+          <p className="text-[14px] font-bold text-app-text">
+            {podeEditarAlgum
+              ? `Seu acesso a ${localAtual?.nome ?? 'este local'} é somente leitura`
+              : 'Você não gerencia nenhum local'}
+          </p>
+          <p className="text-[13px] text-app-text-secondary max-w-md">
+            {podeEditarAlgum
+              ? 'Cadastrar um produto vincula ele a um local. Troque na barra superior para um local que você gerencia e volte aqui.'
+              : 'Cadastrar um produto exige vinculá-lo a pelo menos um local, e o seu acesso hoje é só de leitura. Peça a um administrador para liberar a gestão de um local.'}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   /* ─────────── Tela de sucesso ─────────── */
   if (success) {

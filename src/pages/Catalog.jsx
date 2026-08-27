@@ -6,7 +6,7 @@ import { useLocal } from '../contexts/LocalContext';
 
 function Catalog() {
   const navigate = useNavigate();
-  const { localAtual, loadingLocal } = useLocal();
+  const { localAtual, loadingLocal, podeEditarAtual } = useLocal();
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busca, setBusca] = useState('');
@@ -142,13 +142,19 @@ function Catalog() {
             <Filter size={16} />
             <span>Filtros</span>
           </button>
-          <button
-            className="btn btn-primary flex items-center gap-2"
-            onClick={() => navigate('/cadastro-produto')}
-          >
-            <Plus size={16} />
-            <span>Novo Produto</span>
-          </button>
+          {/* Amarrado ao local da barra, não a "gerencia algum local": o usuário
+              lê o Catálogo como o estoque do local selecionado, então oferecer
+              cadastro aqui enquanto ele só visualiza este local seria promessa
+              falsa — o produto acabaria em outro estoque. */}
+          {podeEditarAtual && (
+            <button
+              className="btn btn-primary flex items-center gap-2"
+              onClick={() => navigate('/cadastro-produto')}
+            >
+              <Plus size={16} />
+              <span>Novo Produto</span>
+            </button>
+          )}
         </div>
       </header>
 

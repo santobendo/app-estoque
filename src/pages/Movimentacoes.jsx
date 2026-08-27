@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocal } from '../contexts/LocalContext';
 import {
-  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw, AlertCircle, X, Scale,
+  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw, AlertCircle, X, Scale, Eye,
 } from 'lucide-react';
 import { traduzErro } from '../components/TabelaCrud';
 
@@ -125,7 +125,7 @@ function ProdutoBusca({ onSelect }) {
 ═══════════════════════════════════════════ */
 export default function Movimentacoes() {
   const { user, isAdmin } = useAuth();
-  const { localAtual } = useLocal();
+  const { localAtual, podeEditarAtual } = useLocal();
 
   /* ── dados mestres ── */
   const [motivos, setMotivos]       = useState([]);
@@ -330,19 +330,47 @@ export default function Movimentacoes() {
 
   const apSelecionada = apresentacoes.find(a => String(a.id) === apresentacaoId);
 
+  const cabecalho = (
+    <header className="flex items-center justify-between">
+      <div>
+        <h1 className="text-2xl mb-0.5">Movimentações</h1>
+        <p className="text-[13px] text-app-text-secondary">
+          {localAtual
+            ? <>Registre entradas e saídas em <span className="font-semibold text-app-text">{localAtual.nome}</span>.</>
+            : 'Selecione um local na barra superior para registrar movimentações.'}
+        </p>
+      </div>
+    </header>
+  );
+
+  /* Quem só visualiza o local não vê o formulário. Deixá-lo à mostra seria
+     pior que escondê-lo: a pessoa preencheria tudo para o RLS recusar no
+     final, sem entender por quê. */
+  if (localAtual && !podeEditarAtual) {
+    return (
+      <div className="flex flex-col gap-5">
+        {cabecalho}
+        <div className="card p-8 flex flex-col items-center text-center gap-3">
+          <div className="w-11 h-11 rounded-full bg-app-bg flex items-center justify-center text-app-text-label">
+            <Eye size={20} />
+          </div>
+          <p className="text-[14px] font-bold text-app-text">
+            Seu acesso a {localAtual.nome} é somente leitura
+          </p>
+          <p className="text-[13px] text-app-text-secondary max-w-md">
+            Você pode consultar o catálogo e o histórico deste local, mas não
+            registrar movimentações. Peça a um administrador para liberar a
+            gestão do local, ou troque de local na barra superior.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-5">
 
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl mb-0.5">Movimentações</h1>
-          <p className="text-[13px] text-app-text-secondary">
-            {localAtual
-              ? <>Registre entradas e saídas em <span className="font-semibold text-app-text">{localAtual.nome}</span>.</>
-              : 'Selecione um local na barra superior para registrar movimentações.'}
-          </p>
-        </div>
-      </header>
+      {cabecalho}
 
       {success && (
         <div className="card px-5 py-4 flex items-center justify-between gap-4 border-l-4 border-emerald-500">

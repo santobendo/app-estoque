@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
+import { useLocal } from '../contexts/LocalContext';
 import {
   ChevronLeft, Package, Plus, Pencil, Trash2, Check, X,
   MapPin, AlertCircle, Box,
@@ -16,11 +17,13 @@ export default function ProdutoDetalhe() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { isAdmin } = useAuth();
+  /* Os locais vêm do contexto, não de uma consulta própria: lá cada um já
+     carrega o pode_editar, que decide quem vincula local e edita o mínimo. */
+  const { locais, localAtual, podeEditarAtual, podeEditarAlgum } = useLocal();
 
   const [produto, setProduto]       = useState(null);
   const [categorias, setCategorias] = useState([]);
   const [unidades, setUnidades]     = useState([]);
-  const [locais, setLocais]         = useState([]);
   const [loading, setLoading]       = useState(true);
   const [erro, setErro]             = useState(null);
 
@@ -33,7 +36,7 @@ export default function ProdutoDetalhe() {
 
   const fetch = useCallback(async () => {
     setLoading(true);
-    const [{ data: prod, error: errProd }, { data: cats }, { data: units }, { data: locs }] =
+    const [{ data: prod, error: errProd }, { data: cats }, { data: units }] =
       await Promise.all([
         supabase
           .from('produtos')
@@ -49,7 +52,6 @@ export default function ProdutoDetalhe() {
           .single(),
         supabase.from('categorias').select('id, nome').order('nome'),
         supabase.from('unidades').select('id, sigla, nome').order('sigla'),
-        supabase.from('locais').select('id, nome').eq('ativo', true).order('nome'),
       ]);
 
     if (errProd) setErro(traduzErro(errProd));
@@ -59,7 +61,6 @@ export default function ProdutoDetalhe() {
     setProduto(prod ?? null);
     setCategorias(cats ?? []);
     setUnidades(units ?? []);
-    setLocais(locs ?? []);
     setLoading(false);
   }, [id]);
 
@@ -96,15 +97,33 @@ export default function ProdutoDetalhe() {
 
   const salvarNovaAp = async () => {
     if (!validaAp(novaAp)) return;
+    if (novaAp.locais.length === 0) {
+      setErro('Selecione ao menos um local para a nova apresentação.');
+      return;
+    }
     setSalvando(true); setErro(null);
-    const { error } = await supabase.from('apresentacoes').insert([{
-      produto_id: Number(id),
-      descricao: novaAp.descricao.trim() || produto.nome,
-      quantidade_unitaria: Number(novaAp.quantidade_unitaria),
-      unidade_id: Number(novaAp.unidade_id),
-    }]);
+    /* Pela RPC, e não por insert direto: apresentação e vínculos de local
+       entram na mesma transação. Em duas chamadas, a segunda falhando
+       deixaria a apresentação órfã de local. */
+    const { error } = await supabase.rpc('fn_adiciona_apresentacoes_produto', {
+      p_produto_id: Number(id),
+      p_apresentacoes: [{
+        descricao: novaAp.descricao.trim() || produto.nome,
+        quantidade_unitaria: Number(novaAp.quantidade_unitaria),
+        unidade_id: Number(novaAp.unidade_id),
+        locais: novaAp.locais.map(local_id => ({ local_id, quantidade_inicial: 0 })),
+      }],
+    });
     setSalvando(false);
-    if (error) { setErro(traduzErro(error)); return; }
+    /* A RPC levanta mensagens próprias em português, então error.message é o
+       melhor texto — exceto no 23505, que vem do índice de descrição única e
+       chega cru, em inglês. */
+    if (error) {
+      setErro(error.code === '23505'
+        ? `Este produto já tem uma apresentação chamada "${novaAp.descricao.trim()}".`
+        : error.message || traduzErro(error));
+      return;
+    }
     setNovaAp(null);
     fetch();
   };
@@ -156,14 +175,25 @@ export default function ProdutoDetalhe() {
     if (!editMin) return;
     const valor = Math.max(Number(editMin.valor) || 0, 0);
     setErro(null);
-    const { error } = await supabase
-      .from('estoques')
-      .update({ estoque_minimo: valor })
-      .eq('id', editMin.estoqueId);
-    if (error) { setErro(traduzErro(error)); return; }
+    /* Via RPC, e não UPDATE direto: RLS é por linha, não por coluna — dar
+       UPDATE em estoques a um gestor liberaria também quantidade_atual, que
+       só pode mudar pelo trigger de movimentações. */
+    const { error } = await supabase.rpc('fn_define_estoque_minimo', {
+      p_estoque_id: editMin.estoqueId,
+      p_valor: valor,
+    });
+    /* A função levanta mensagens próprias, em português e específicas ("Sem
+       permissão para alterar o estoque mínimo deste local"); traduzErro só
+       entra se vier um erro de transporte. */
+    if (error) { setErro(error.message || traduzErro(error)); return; }
     setEditMin(null);
     fetch();
   };
+
+  /* Vincular local e mudar o mínimo são permissões por local; editar produto
+     e apresentação continuam de admin, porque são dados globais. */
+  const podeEditarLocal = (localId) =>
+    locais.find(l => l.id === localId)?.pode_editar === true;
 
   /* ─── Vínculos com locais (estoques) ─── */
   const vincularLocal = async (apId, localId) => {
@@ -220,10 +250,14 @@ export default function ProdutoDetalhe() {
     );
   }
 
+  /* A apresentação nasce já vinculada ao local da barra superior. Sem isso
+     ela ficaria sem local nenhum — invisível no catálogo, inclusive para
+     admin — que é justamente o buraco que a busca-antes-de-criar fecha. */
   const emptyNovaAp = () => ({
     descricao: '',
     quantidade_unitaria: '',
     unidade_id: unidades.length ? String(unidades[0].id) : '',
+    locais: podeEditarAtual && localAtual ? [localAtual.id] : [],
   });
 
   return (
@@ -313,18 +347,24 @@ export default function ProdutoDetalhe() {
             <span className="text-[13px] font-bold text-app-text uppercase tracking-wide">Apresentações</span>
             <span className="text-[11px] text-app-text-secondary ml-2">embalagens / tamanhos</span>
           </div>
-          <button
-            onClick={() => { setNovaAp(emptyNovaAp()); setEditAp(null); }}
-            disabled={!!novaAp}
-            className="btn btn-primary flex items-center gap-1.5 text-[12px] px-4 py-2"
-          >
-            <Plus size={13} /> Nova Apresentação
-          </button>
+          {/* O local vai no rótulo porque a lista abaixo mostra todos os locais:
+              sem ele, nada na tela diz onde a apresentação vai parar. */}
+          {podeEditarAtual && (
+            <button
+              onClick={() => { setNovaAp(emptyNovaAp()); setEditAp(null); }}
+              disabled={!!novaAp}
+              className="btn btn-primary flex items-center gap-1.5 text-[12px] px-4 py-2 shrink-0"
+            >
+              <Plus size={13} /> Nova apresentação em {localAtual.nome}
+            </button>
+          )}
         </div>
 
         <div className="divide-y divide-app-border-inner">
-          {/* Formulário de nova apresentação */}
-          {novaAp && (
+          {/* Formulário de nova apresentação. Some se o usuário trocar para um
+              local que só visualiza — deixá-lo aberto manteria em tela um
+              formulário que o banco recusaria no fim. */}
+          {novaAp && podeEditarAtual && (
             <div className="p-6 bg-app-bg/50 flex flex-col gap-4">
               <span className="text-[11px] font-bold text-app-text-label uppercase tracking-widest">
                 Nova apresentação
@@ -365,6 +405,43 @@ export default function ProdutoDetalhe() {
                   </select>
                 </div>
               </div>
+
+              <div className="flex flex-col gap-2">
+                <Label>Locais</Label>
+                <div className="flex flex-wrap gap-2">
+                  {locais.filter(l => l.pode_editar).map(l => {
+                    const marcado = novaAp.locais.includes(l.id);
+                    return (
+                      <button
+                        key={l.id}
+                        type="button"
+                        onClick={() => setNovaAp(p => ({
+                          ...p,
+                          locais: marcado
+                            ? p.locais.filter(x => x !== l.id)
+                            : [...p.locais, l.id],
+                        }))}
+                        className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold border-[1.5px] transition-all ${
+                          marcado
+                            ? 'border-app-text bg-app-text text-white'
+                            : 'border-app-border text-app-text-secondary hover:border-app-text-label'
+                        }`}
+                      >
+                        <MapPin size={12} />
+                        {l.nome}
+                        {l.id === localAtual?.id && (
+                          <span className="opacity-60 font-normal">· atual</span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-app-text-secondary">
+                  Começa com saldo zero em cada local — registre uma entrada em
+                  Movimentações depois.
+                </p>
+              </div>
+
               <div className="flex gap-2 justify-end">
                 <button onClick={() => setNovaAp(null)} className="btn btn-secondary px-4 py-2 text-[12px]">Cancelar</button>
                 <button onClick={salvarNovaAp} disabled={salvando} className="btn btn-primary flex items-center gap-1.5 px-4 py-2 text-[12px]">
@@ -382,7 +459,7 @@ export default function ProdutoDetalhe() {
 
           {produto.apresentacoes.map(ap => {
             const locaisDisponiveis = locais.filter(
-              l => !ap.estoques.some(e => e.local_id === l.id)
+              l => l.pode_editar && !ap.estoques.some(e => e.local_id === l.id)
             );
             const emEdicao = editAp?.id === ap.id;
 
@@ -464,12 +541,21 @@ export default function ProdutoDetalhe() {
                 {/* Locais vinculados */}
                 {!emEdicao && (
                   <div className="flex flex-wrap items-center gap-2">
-                    {ap.estoques.map(e => (
+                    {ap.estoques.map(e => {
+                      /* Destaca o local da barra: a lista mistura todos os locais
+                         visíveis, e sem marca o usuário não sabe qual deles é o
+                         que as ações desta tela alcançam. */
+                      const doLocalAtual = e.local_id === localAtual?.id;
+                      return (
                       <span
                         key={e.id}
-                        className="inline-flex items-center gap-1.5 bg-app-bg rounded-lg px-2.5 py-1.5 text-[12px]"
+                        className={`inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] ${
+                          doLocalAtual
+                            ? 'bg-white ring-[1.5px] ring-app-text/25'
+                            : 'bg-app-bg'
+                        }`}
                       >
-                        <MapPin size={12} className="text-app-text-label" />
+                        <MapPin size={12} className={doLocalAtual ? 'text-app-text' : 'text-app-text-label'} />
                         <span className="font-semibold">{e.locais?.nome}</span>
                         <span className="text-app-text-secondary">· {Number(e.quantidade_atual)} emb.</span>
                         {editMin?.estoqueId === e.id ? (
@@ -494,10 +580,10 @@ export default function ProdutoDetalhe() {
                           </span>
                         ) : (
                           <button
-                            disabled={!isAdmin}
+                            disabled={!podeEditarLocal(e.local_id)}
                             onClick={() => setEditMin({ estoqueId: e.id, valor: Number(e.estoque_minimo) })}
-                            title={isAdmin ? 'Estoque mínimo — clique para editar' : 'Estoque mínimo'}
-                            className={`text-app-text-secondary ${isAdmin ? 'hover:text-app-text underline decoration-dotted underline-offset-2' : ''}`}
+                            title={podeEditarLocal(e.local_id) ? 'Estoque mínimo — clique para editar' : 'Estoque mínimo'}
+                            className={`text-app-text-secondary ${podeEditarLocal(e.local_id) ? 'hover:text-app-text underline decoration-dotted underline-offset-2' : ''}`}
                           >
                             · mín {Number(e.estoque_minimo)}
                           </button>
@@ -512,7 +598,8 @@ export default function ProdutoDetalhe() {
                           </button>
                         )}
                       </span>
-                    ))}
+                      );
+                    })}
 
                     {locaisDisponiveis.length > 0 && (
                       <select
@@ -528,7 +615,11 @@ export default function ProdutoDetalhe() {
                     )}
 
                     {ap.estoques.length === 0 && locaisDisponiveis.length === 0 && (
-                      <span className="text-[12px] text-app-text-secondary">Nenhum local ativo cadastrado.</span>
+                      <span className="text-[12px] text-app-text-secondary">
+                        {podeEditarAlgum
+                          ? 'Nenhum local ativo cadastrado.'
+                          : 'Não vinculada a nenhum local que você acessa.'}
+                      </span>
                     )}
                   </div>
                 )}
@@ -538,10 +629,12 @@ export default function ProdutoDetalhe() {
         </div>
       </div>
 
-      <p className="text-[12px] text-app-text-secondary">
-        Locais recém-vinculados começam com saldo zero — registre uma entrada em{' '}
-        <span className="font-semibold">Movimentações</span> para adicionar estoque.
-      </p>
+      {podeEditarAtual && (
+        <p className="text-[12px] text-app-text-secondary">
+          Locais recém-vinculados começam com saldo zero — registre uma entrada em{' '}
+          <span className="font-semibold">Movimentações</span> para adicionar estoque.
+        </p>
+      )}
     </div>
   );
 }
