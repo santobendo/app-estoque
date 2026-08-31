@@ -4,11 +4,12 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocal } from '../contexts/LocalContext';
 import {
-  Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw, AlertCircle, X, Scale, Eye,
+  Search, ArrowDownCircle, ArrowUpCircle, AlertCircle, Scale, Eye,
   CornerDownLeft,
 } from 'lucide-react';
 import { traduzErro } from '../components/TabelaCrud';
 import Kbd from '../components/Kbd';
+import { useToast } from '../lib/toast';
 
 /* ─── helpers ─── */
 function Label({ children, required }) {
@@ -50,14 +51,13 @@ function Spinner() {
    ida ao servidor a cada letra a navegação por teclado fica intragável, e
    o ilike ainda ignora acento ("acucar" não achava "AÇÚCAR"). */
 const normalizar = (s) =>
-  (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+  (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
 
 const MAX_RESULTADOS = 10;
 
-function ProdutoBusca({ onSelect, erro }) {
+function ProdutoBusca({ valor, onValorChange, onSelect, erro, inputRef }) {
   const [catalogo, setCatalogo]       = useState([]);
   const [carregando, setCarregando]   = useState(true);
-  const [busca, setBusca]             = useState('');
   const [aberto, setAberto]           = useState(false);
   const [indiceAtivo, setIndiceAtivo] = useState(0);
 
@@ -83,7 +83,7 @@ function ProdutoBusca({ onSelect, erro }) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const termo = normalizar(busca).trim();
+  const termo = normalizar(valor).trim();
 
   const resultados = useMemo(() => {
     if (!termo) return [];
@@ -101,7 +101,7 @@ function ProdutoBusca({ onSelect, erro }) {
   }, [indiceAtivo, painelAberto]);
 
   const selecionar = (produto) => {
-    setBusca(produto.nome);
+    onValorChange(produto.nome);
     setAberto(false);
     onSelect(produto);
   };
@@ -152,10 +152,11 @@ function ProdutoBusca({ onSelect, erro }) {
           className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-label pointer-events-none"
         />
         <input
+          ref={inputRef}
           type="text"
-          value={busca}
+          value={valor}
           onChange={(e) => {
-            setBusca(e.target.value);
+            onValorChange(e.target.value);
             setAberto(true);
             setIndiceAtivo(0);
             onSelect(null);
@@ -223,7 +224,7 @@ function ProdutoBusca({ onSelect, erro }) {
             </>
           ) : (
             <div className="px-4 py-3 text-[13px] text-app-text-secondary">
-              Nenhum produto encontrado para “{busca.trim()}”.
+              Nenhum produto encontrado para “{valor.trim()}”.
             </div>
           )}
         </div>
@@ -238,6 +239,13 @@ function ProdutoBusca({ onSelect, erro }) {
 export default function Movimentacoes() {
   const { user, isAdmin } = useAuth();
   const { localAtual, podeEditarAtual } = useLocal();
+  const toast = useToast();
+
+  /* O combobox e o inicio do fluxo: quem chega aqui vai digitar um produto.
+     Receber o foco de entrada e devolve-lo apos cada gravacao deixa a tela
+     inteira operavel sem tirar a mao do teclado. */
+  const buscaRef = useRef(null);
+  useEffect(() => { buscaRef.current?.focus(); }, []);
 
   /* ── dados mestres ── */
   const [motivos, setMotivos]       = useState([]);
@@ -247,6 +255,7 @@ export default function Movimentacoes() {
   /* ── seleções ── */
   const [modo, setModo]                 = useState('movimento'); // 'movimento' | 'ajuste'
   const [produto, setProduto]           = useState(null);
+  const [buscaProduto, setBuscaProduto] = useState('');
   const [apresentacaoId, setApresentacaoId] = useState('');
   const [estoqueId, setEstoqueId]       = useState('');
   const [tipo, setTipo]                 = useState('saida');
@@ -257,9 +266,7 @@ export default function Movimentacoes() {
 
   /* ── estado ── */
   const [loading, setLoading]   = useState(false);
-  const [success, setSuccess]   = useState(false);
   const [erros, setErros]       = useState({});
-  const [erroSubmit, setErroSubmit] = useState(null);
   const [estoqueAtual, setEstoqueAtual] = useState(null);
 
   /* ─ Carrega motivos ─
@@ -369,7 +376,6 @@ export default function Movimentacoes() {
   /* ─ Submissão ─ */
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErroSubmit(null);
     if (!validate()) return;
     setLoading(true);
 
@@ -386,7 +392,7 @@ export default function Movimentacoes() {
 
       if (errEst) {
         setLoading(false);
-        setErroSubmit(traduzErro(errEst));
+        toast.erro(traduzErro(errEst));
         return;
       }
 
@@ -423,15 +429,21 @@ export default function Movimentacoes() {
     setLoading(false);
 
     if (error) {
-      setErroSubmit(traduzErro(error));
+      toast.erro(traduzErro(error));
     } else {
-      setSuccess(true);
+      toast.sucesso(modo === 'ajuste'
+        ? 'Ajuste registrado com sucesso!'
+        : 'Movimentação registrada com sucesso!');
+      /* modo e tipo sobrevivem ao reset de proposito: quem faz um ajuste
+         normalmente faz varios seguidos. */
       resetForm();
+      buscaRef.current?.focus();
     }
   };
 
   const resetForm = () => {
     setProduto(null);
+    setBuscaProduto('');
     setApresentacaoId('');
     setEstoqueId('');
     setQuantidade('');
@@ -483,31 +495,6 @@ export default function Movimentacoes() {
     <div className="flex flex-col gap-5">
 
       {cabecalho}
-
-      {success && (
-        <div className="card px-5 py-4 flex items-center justify-between gap-4 border-l-4 border-emerald-500">
-          <div className="flex items-center gap-3">
-            <CheckCircle size={20} className="text-emerald-500 shrink-0" />
-            <span className="text-[13px] font-semibold text-app-text">
-              {modo === 'ajuste' ? 'Ajuste registrado com sucesso!' : 'Movimentação registrada com sucesso!'}
-            </span>
-          </div>
-          <button
-            className="btn btn-secondary flex items-center gap-1.5 text-[12px]"
-            onClick={() => setSuccess(false)}
-          >
-            <RotateCcw size={13} /> Nova movimentação
-          </button>
-        </div>
-      )}
-
-      {erroSubmit && (
-        <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-2.5 text-[13px]">
-          <AlertCircle size={15} className="shrink-0" />
-          <span className="flex-1">{erroSubmit}</span>
-          <button onClick={() => setErroSubmit(null)} className="p-1 hover:text-rose-900"><X size={14} /></button>
-        </div>
-      )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
 
@@ -571,7 +558,13 @@ export default function Movimentacoes() {
           <div className="p-6 grid grid-cols-2 gap-4">
             <div className="col-span-2 flex flex-col gap-1.5">
               <Label required>Produto</Label>
-              <ProdutoBusca onSelect={setProduto} erro={erros.produto} />
+              <ProdutoBusca
+                valor={buscaProduto}
+                onValorChange={setBuscaProduto}
+                onSelect={setProduto}
+                erro={erros.produto}
+                inputRef={buscaRef}
+              />
               {erros.produto && <span className="text-rose-500 text-[11px]">{erros.produto}</span>}
             </div>
 

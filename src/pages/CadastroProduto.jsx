@@ -2,12 +2,13 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import {
   Plus, Trash2, CheckCircle, ChevronLeft, Package, MapPin,
-  AlertCircle, X, Search, CornerDownLeft, Eye,
+  Search, CornerDownLeft, Eye,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useLocal } from '../contexts/LocalContext';
 import { traduzErro } from '../components/TabelaCrud';
 import Kbd from '../components/Kbd';
+import { useToast } from '../lib/toast';
 
 /* Comparação de nomes ignorando acento e caixa: "ACUCAR" acha "AÇÚCAR".
    Roda no cliente porque o catálogo inteiro cabe em poucos KB — busca
@@ -81,6 +82,7 @@ const emptyApresentacao = (unidades = [], localAtual = null) => ({
 export default function CadastroProduto() {
   const navigate = useNavigate();
   const { localAtual, locais: locaisContexto, podeEditarAtual, podeEditarAlgum, loadingLocal } = useLocal();
+  const toast = useToast();
 
   /* Só os locais que o usuário gerencia: vincular apresentação a um local é
      um INSERT em estoques, que o RLS recusa fora deles. Oferecer os demais
@@ -116,7 +118,6 @@ export default function CadastroProduto() {
   const [loading, setLoading]   = useState(false);
   const [success, setSuccess]   = useState(false);
   const [erros, setErros]       = useState({});
-  const [erroSubmit, setErroSubmit] = useState(null);
 
   /* ────────────────────────────────────────── */
   useEffect(() => {
@@ -217,7 +218,6 @@ export default function CadastroProduto() {
     setNomeProduto(p.nome);
     setBuscaAberta(false);
     setErros({});
-    setErroSubmit(null);
     setApsExistentes(
       (p.apresentacoes ?? [])
         .slice()
@@ -233,7 +233,6 @@ export default function CadastroProduto() {
     setApsExistentes([]);
     setApresentacoes([emptyApresentacao(unidades, localPadrao)]);
     setErros({});
-    setErroSubmit(null);
     setBuscaAberta(true);
   };
 
@@ -363,7 +362,6 @@ export default function CadastroProduto() {
      gravado. Duas RPCs porque os dois caminhos gravam coisas diferentes. */
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setErroSubmit(null);
     if (!validate()) return;
 
     setLoading(true);
@@ -399,7 +397,7 @@ export default function CadastroProduto() {
     setLoading(false);
 
     if (error) {
-      setErroSubmit(
+      toast.erro(
         error.code === '23505'
           ? (produtoSel
               ? 'Esse produto já tem uma apresentação com essa descrição.'
@@ -419,7 +417,6 @@ export default function CadastroProduto() {
     setApsExistentes([]);
     setApresentacoes([emptyApresentacao(unidades, localPadrao)]);
     setErros({});
-    setErroSubmit(null);
     setSuccess(false);
   };
 
@@ -496,15 +493,6 @@ export default function CadastroProduto() {
         </div>
       </header>
 
-      {erroSubmit && (
-        <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-2.5 text-[13px]">
-          <AlertCircle size={15} className="shrink-0" />
-          <span className="flex-1">{erroSubmit}</span>
-          <button type="button" onClick={() => setErroSubmit(null)} className="p-1 hover:text-rose-900">
-            <X size={14} />
-          </button>
-        </div>
-      )}
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4" noValidate>
 

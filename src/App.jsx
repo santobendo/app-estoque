@@ -4,6 +4,7 @@ import { AuthProvider } from './contexts/AuthContext';
 import { LocalProvider } from './contexts/LocalContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import MainLayout from './components/MainLayout';
+import ToastProvider from './components/ToastProvider';
 
 import Login              from './pages/Login';
 import Catalog            from './pages/Catalog';
@@ -23,6 +24,7 @@ function App() {
   return (
     <AuthProvider>
       <LocalProvider>
+      <ToastProvider>
       <Routes>
         <Route path="/login" element={<Login />} />
 
@@ -44,6 +46,7 @@ function App() {
           </Route>
         </Route>
       </Routes>
+      </ToastProvider>
       </LocalProvider>
     </AuthProvider>
   );
