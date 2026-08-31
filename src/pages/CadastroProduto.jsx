@@ -7,6 +7,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { useLocal } from '../contexts/LocalContext';
 import { traduzErro } from '../components/TabelaCrud';
+import Kbd from '../components/Kbd';
 
 /* Comparação de nomes ignorando acento e caixa: "ACUCAR" acha "AÇÚCAR".
    Roda no cliente porque o catálogo inteiro cabe em poucos KB — busca
@@ -732,14 +733,6 @@ function SectionHeader({ number, title }) {
 }
 
 /* Tecla desenhada, para as dicas do rodapé do painel. */
-function Kbd({ children }) {
-  return (
-    <kbd className="inline-flex items-center justify-center min-w-[16px] h-[16px] px-1 mr-0.5 rounded border border-app-border bg-white font-sans text-[9px] font-bold text-app-text-secondary">
-      {children}
-    </kbd>
-  );
-}
-
 /* Painel de sugestões do catálogo global.
    Não mostra em quais locais o produto existe: além de vazar o que o RLS
    restringe, é irrelevante — o que importa é "esse produto já existe".

@@ -1,12 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/AuthContext';
 import { useLocal } from '../contexts/LocalContext';
 import {
   Search, ArrowDownCircle, ArrowUpCircle, CheckCircle, RotateCcw, AlertCircle, X, Scale, Eye,
+  CornerDownLeft,
 } from 'lucide-react';
 import { traduzErro } from '../components/TabelaCrud';
+import Kbd from '../components/Kbd';
 
 /* ─── helpers ─── */
 function Label({ children, required }) {
@@ -38,13 +40,40 @@ function Spinner() {
   );
 }
 
-/* ─── componente de busca de produto ─── */
-function ProdutoBusca({ onSelect }) {
-  const [busca, setBusca] = useState('');
-  const [resultados, setResultados] = useState([]);
-  const [buscando, setBuscando] = useState(false);
-  const [aberto, setAberto] = useState(false);
-  const ref = useRef(null);
+/* ─── combobox de produto ───
+   Busca o catálogo inteiro, não só o do local selecionado. Um produto que
+   existe em outro estoque precisa aparecer para o aviso "não vinculada a
+   este local" poder levar o usuário à tela do produto — filtrar aqui
+   esconderia esse caminho e empurraria para o cadastro duplicado.
+
+   O catálogo vem de uma consulta só, no lugar de um ilike por tecla: com
+   ida ao servidor a cada letra a navegação por teclado fica intragável, e
+   o ilike ainda ignora acento ("acucar" não achava "AÇÚCAR"). */
+const normalizar = (s) =>
+  (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase();
+
+const MAX_RESULTADOS = 10;
+
+function ProdutoBusca({ onSelect, erro }) {
+  const [catalogo, setCatalogo]       = useState([]);
+  const [carregando, setCarregando]   = useState(true);
+  const [busca, setBusca]             = useState('');
+  const [aberto, setAberto]           = useState(false);
+  const [indiceAtivo, setIndiceAtivo] = useState(0);
+
+  const ref          = useRef(null);
+  const itemAtivoRef = useRef(null);
+
+  useEffect(() => {
+    supabase
+      .from('produtos')
+      .select('id, nome, categorias(nome)')
+      .order('nome')
+      .then(({ data }) => {
+        setCatalogo(data ?? []);
+        setCarregando(false);
+      });
+  }, []);
 
   useEffect(() => {
     const handler = (e) => {
@@ -54,66 +83,149 @@ function ProdutoBusca({ onSelect }) {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  const termo = normalizar(busca).trim();
+
+  const resultados = useMemo(() => {
+    if (!termo) return [];
+    return catalogo
+      .filter(p => normalizar(p.nome).includes(termo))
+      .slice(0, MAX_RESULTADOS);
+  }, [catalogo, termo]);
+
+  const painelAberto = aberto && termo.length > 0;
+
+  /* Mantém a linha destacada à vista quando a navegação passa do fim da área
+     rolável. 'nearest' evita o salto quando ela já está visível. */
   useEffect(() => {
-    if (!busca.trim()) { setResultados([]); return; }
-    const timer = setTimeout(async () => {
-      setBuscando(true);
-      const { data } = await supabase
-        .from('produtos')
-        .select('id, nome, categorias(nome)')
-        .ilike('nome', `%${busca}%`)
-        .order('nome')
-        .limit(10);
-      setResultados(data ?? []);
-      setAberto(true);
-      setBuscando(false);
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [busca]);
+    if (painelAberto) itemAtivoRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [indiceAtivo, painelAberto]);
 
   const selecionar = (produto) => {
     setBusca(produto.nome);
     setAberto(false);
-    setResultados([]);
     onSelect(produto);
+  };
+
+  const handleKeyDown = (e) => {
+    /* Seta para baixo com o painel fechado reabre, em vez de não fazer nada:
+       é como se volta à lista depois de fechar por engano. */
+    if (!painelAberto) {
+      if (e.key === 'ArrowDown' && termo.length > 0) {
+        e.preventDefault();
+        setAberto(true);
+        setIndiceAtivo(0);
+      }
+      return;
+    }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setAberto(false);
+      return;
+    }
+    if (!resultados.length) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setIndiceAtivo(i => (i + 1) % resultados.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setIndiceAtivo(i => (i - 1 + resultados.length) % resultados.length);
+    } else if (e.key === 'Home') {
+      e.preventDefault();
+      setIndiceAtivo(0);
+    } else if (e.key === 'End') {
+      e.preventDefault();
+      setIndiceAtivo(resultados.length - 1);
+    } else if (e.key === 'Enter') {
+      /* preventDefault senão o Enter envia o formulário da tela inteira. */
+      e.preventDefault();
+      const escolhido = resultados[indiceAtivo] ?? resultados[0];
+      if (escolhido) selecionar(escolhido);
+    }
   };
 
   return (
     <div className="relative" ref={ref}>
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-label" size={15} />
+        <Search
+          size={15}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-app-text-label pointer-events-none"
+        />
         <input
           type="text"
           value={busca}
-          onChange={(e) => { setBusca(e.target.value); onSelect(null); }}
-          placeholder="Buscar produto pelo nome..."
-          className="input-base w-full pl-9"
+          onChange={(e) => {
+            setBusca(e.target.value);
+            setAberto(true);
+            setIndiceAtivo(0);
+            onSelect(null);
+          }}
+          onFocus={() => setAberto(true)}
+          onKeyDown={handleKeyDown}
+          placeholder="Buscar produto pelo nome…"
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={painelAberto}
+          aria-controls="painel-produtos"
+          aria-autocomplete="list"
+          aria-activedescendant={painelAberto ? `produto-${indiceAtivo}` : undefined}
+          className={`input-base w-full pl-9 ${erro ? 'border-rose-400' : ''}`}
         />
-        {buscando && (
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-app-text-label">
-            <Spinner />
-          </span>
-        )}
       </div>
-      {aberto && resultados.length > 0 && (
-        <ul className="absolute z-50 w-full mt-1 bg-white border border-app-border rounded-xl shadow-lg max-h-60 overflow-y-auto">
-          {resultados.map(p => (
-            <li
-              key={p.id}
-              onClick={() => selecionar(p)}
-              className="px-4 py-2.5 cursor-pointer hover:bg-app-bg flex items-center justify-between"
-            >
-              <span className="text-[13px] font-semibold text-app-text">{p.nome}</span>
-              {p.categorias?.nome && (
-                <span className="text-[11px] text-app-text-secondary">{p.categorias.nome}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      )}
-      {aberto && resultados.length === 0 && busca.trim() && !buscando && (
-        <div className="absolute z-50 w-full mt-1 bg-white border border-app-border rounded-xl shadow-lg px-4 py-3 text-[13px] text-app-text-secondary">
-          Nenhum produto encontrado.
+
+      {painelAberto && (
+        <div className="absolute left-0 right-0 top-full mt-1.5 z-30 card shadow-[0_16px_40px_rgba(0,0,0,0.12)] overflow-hidden">
+          {carregando ? (
+            <div className="px-4 py-3 text-[13px] text-app-text-secondary">
+              Carregando produtos…
+            </div>
+          ) : resultados.length > 0 ? (
+            <>
+              <div
+                id="painel-produtos"
+                role="listbox"
+                className="max-h-60 overflow-y-auto divide-y divide-app-border-inner"
+              >
+                {resultados.map((p, i) => {
+                  const ativo = i === indiceAtivo;
+                  return (
+                    <button
+                      key={p.id}
+                      id={`produto-${i}`}
+                      ref={ativo ? itemAtivoRef : null}
+                      type="button"
+                      role="option"
+                      aria-selected={ativo}
+                      onMouseEnter={() => setIndiceAtivo(i)}
+                      onClick={() => selecionar(p)}
+                      className={`w-full text-left px-4 py-2.5 border-l-2 transition-colors flex items-center gap-3 ${
+                        ativo ? 'bg-app-bg border-app-text' : 'border-transparent'
+                      }`}
+                    >
+                      <span className="text-[13px] font-semibold text-app-text truncate flex-1">
+                        {p.nome}
+                      </span>
+                      {p.categorias?.nome && (
+                        <span className="badge-sky text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded shrink-0">
+                          {p.categorias.nome}
+                        </span>
+                      )}
+                      {ativo && <CornerDownLeft size={13} className="text-app-text-label shrink-0" />}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="px-4 py-2 border-t border-app-border-inner bg-white flex items-center gap-3 text-[10px] text-app-text-label">
+                <span><Kbd>↑</Kbd><Kbd>↓</Kbd> navegar</span>
+                <span><Kbd>↵</Kbd> selecionar</span>
+                <span><Kbd>esc</Kbd> fechar</span>
+              </div>
+            </>
+          ) : (
+            <div className="px-4 py-3 text-[13px] text-app-text-secondary">
+              Nenhum produto encontrado para “{busca.trim()}”.
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -459,7 +571,7 @@ export default function Movimentacoes() {
           <div className="p-6 grid grid-cols-2 gap-4">
             <div className="col-span-2 flex flex-col gap-1.5">
               <Label required>Produto</Label>
-              <ProdutoBusca onSelect={setProduto} />
+              <ProdutoBusca onSelect={setProduto} erro={erros.produto} />
               {erros.produto && <span className="text-rose-500 text-[11px]">{erros.produto}</span>}
             </div>
 

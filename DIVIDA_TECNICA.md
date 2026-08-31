@@ -3,7 +3,7 @@
 Registro do que o `npx eslint src` acusa hoje, para limpar de uma vez depois que
 a refatoração de acesso por local terminar.
 
-**Estado em 27/08/2026:** 18 erros e 1 aviso, em 10 arquivos.
+**Estado em 31/08/2026:** 17 erros e 1 aviso, em 10 arquivos.
 Nenhum quebra o build — `npx vite build` passa limpo.
 
 ```
@@ -12,7 +12,7 @@ npx eslint src
 
 ---
 
-## 1. `react-hooks/set-state-in-effect` — 14 erros
+## 1. `react-hooks/set-state-in-effect` — 13 erros
 
 O grosso da dívida, e um padrão único repetido no projeto todo:
 
@@ -31,12 +31,12 @@ Onde aparece:
 
 | Arquivo | Linhas |
 |---|---|
-| `src/pages/Movimentacoes.jsx` | 58, 166, 185, 206, 226 |
+| `src/pages/Movimentacoes.jsx` | 278, 297, 318, 338 |
 | `src/pages/Configuracoes.jsx` | 500, 741 |
 | `src/pages/Historico.jsx` | 84, 87 |
-| `src/pages/CadastroProduto.jsx` | 159 |
+| `src/pages/CadastroProduto.jsx` | 160 |
 | `src/pages/Compras.jsx` | 25 |
-| `src/pages/ProdutoDetalhe.jsx` | 67 |
+| `src/pages/ProdutoDetalhe.jsx` | 68 |
 | `src/components/TabelaCrud.jsx` | 66 |
 | `src/contexts/LocalContext.jsx` | 57 |
 
@@ -58,7 +58,7 @@ Arquivos que exportam componente **e** outra coisa, o que atrapalha o hot reload
 |---|---|---|
 | `src/components/TabelaCrud.jsx` | 29 | `ConfirmDialog`, `Spinner`, `traduzErro` |
 | `src/contexts/AuthContext.jsx` | 82 | `useAuth` |
-| `src/contexts/LocalContext.jsx` | 84 | `useLocal` |
+| `src/contexts/LocalContext.jsx` | 87 | `useLocal` |
 
 **Como resolver:** mover `traduzErro` para `src/lib/`, e os hooks `useAuth`/`useLocal`
 para arquivos próprios (`useAuth.js`, `useLocal.js`). É mecânico, mas mexe em import
@@ -75,7 +75,7 @@ Correção de uma linha.
 
 ## 4. `react-hooks/exhaustive-deps` — 1 aviso — **NÃO CORRIGIR**
 
-`src/pages/Movimentacoes.jsx:228`
+`src/pages/Movimentacoes.jsx:340`
 
 ```jsx
 useEffect(() => {
