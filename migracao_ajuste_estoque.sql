@@ -1,4 +1,11 @@
 -- =============================================================
+-- CONSOLIDADO em migracoes/05_producao_completo.md (secao 1).
+-- Este arquivo ja foi aplicado no banco de TESTES. Para PRODUCAO,
+-- rode o 05, que traz estas mesmas mudancas de forma idempotente
+-- junto com as migracoes 01 a 04 -- nao rode este aqui separado.
+-- =============================================================
+
+-- =============================================================
 -- MIGRAÇÃO — Ajuste de estoque (contagem física)
 -- =============================================================
 -- Rodar no SQL Editor do Supabase (executa como postgres).
