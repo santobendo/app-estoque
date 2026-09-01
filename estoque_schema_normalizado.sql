@@ -2,6 +2,12 @@
 -- SISTEMA DE CONTROLE DE ESTOQUE
 -- Supabase / PostgreSQL
 -- Schema normalizado (1FN, 2FN, 3FN)
+--
+-- Script de criação de banco de PRODUÇÃO. Popula apenas dados de
+-- referência (seção 19) e o admin inicial (seção 20). Locais,
+-- produtos e estoques ficam vazios, para serem cadastrados pelo app.
+-- Para um banco de testes com dados fictícios, rode `seed_demo.sql`
+-- depois deste.
 -- =============================================================
 
 -- -------------------------------------------------------------
@@ -986,13 +992,17 @@ comment on function fn_adiciona_apresentacoes_produto(int, jsonb) is
   'Adiciona apresentações (novas ou já existentes) e seus estoques a um produto que já existe, em transação única. Usada pela busca-antes-de-criar da tela de cadastro de produto.';
 
 -- -------------------------------------------------------------
--- 19. DADOS INICIAIS
+-- 19. DADOS DE REFERÊNCIA
+--     Este script cria bancos de PRODUÇÃO: aqui entram apenas as
+--     tabelas de domínio que o sistema precisa para funcionar, nunca
+--     produtos, locais ou saldos de exemplo. Para popular um banco de
+--     testes com dados fictícios, rode `seed_demo.sql` depois deste.
+--
+--     Locais, produtos, apresentações e estoques nascem vazios e são
+--     cadastrados pelo próprio app (Cadastros > Locais, Cadastro de
+--     Produto). Papeis também: é opcional (o perfil aceita "Sem papel")
+--     e não há tela de CRUD — insira via SQL se a organização usar.
 -- -------------------------------------------------------------
-
--- Papéis operacionais (sem "Admin" — administração é via is_admin)
-insert into papeis (nome, descricao) values
-  ('Almoxarife',  'Controla entrada e saída de materiais');
-  --('Cozinheiro',  'Registra consumo de itens na cozinha');
 
 insert into categorias (nome) values
   ('Limpeza'),
@@ -1008,7 +1018,11 @@ insert into unidades (sigla, nome) values
   ('g',   'Grama'),
   ('un',  'Unidade');
 
--- Motivos de movimentação normalizados
+-- Motivos de movimentação normalizados.
+-- NÃO é seed opcional: os códigos abaixo estão fixos no frontend
+-- (Movimentacoes.jsx), nas views de consumo, nas policies e nas RPCs
+-- fn_cria_produto_completo / fn_adiciona_apresentacoes_produto, que abortam
+-- se 'saldo_inicial' não existir. Não há tela de CRUD para esta tabela.
 insert into motivos_movimentacao (codigo, descricao) values
   ('uso',      'Consumo regular'),
   ('descarte', 'Item descartado por validade, dano ou inutilidade'),
@@ -1019,29 +1033,6 @@ insert into motivos_movimentacao (codigo, descricao) values
   -- física e é restrito a admin (ver policy em 17). Sem este motivo próprio,
   -- não-admin não conseguiria cadastrar produto com saldo inicial > 0.
   ('saldo_inicial', 'Saldo inicial do cadastro');
-
-insert into locais (nome, descricao) values
-  ('Almoxarifado', 'Depósito principal'),
-  ('Cozinha',      'Estoque de uso diário da cozinha');
-
-insert into produtos (nome, categoria_id) values
-  ('Água Sanitária', (select id from categorias where nome = 'Limpeza')),
-  ('Detergente',     (select id from categorias where nome = 'Limpeza')),
-  ('Papel Toalha',   (select id from categorias where nome = 'Higiene'));
-
-insert into apresentacoes (produto_id, descricao, quantidade_unitaria, unidade_id) values
-  (1, 'Frasco 2L',    2,   (select id from unidades where sigla = 'L')),
-  (1, 'Galão 5L',     5,   (select id from unidades where sigla = 'L')),
-  --(2, 'Frasco 500ml', 0.5, (select id from unidades where sigla = 'L')),
-  (3, 'Rolo',         1,   (select id from unidades where sigla = 'un'));
-
-insert into estoques (apresentacao_id, local_id) values
-  (1, 1),  -- Água Sanitária 2L  / Almoxarifado
-  (2, 1),  -- Água Sanitária 5L  / Almoxarifado
-  --(3, 1),  -- Detergente 500ml   / Almoxarifado
-  (4, 1),  -- Papel Toalha Rolo  / Almoxarifado
-  --(3, 2),  -- Detergente 500ml   / Cozinha
-  (4, 2);  -- Papel Toalha Rolo  / Cozinha
 
 -- -------------------------------------------------------------
 -- 20. USUÁRIO ADMIN INICIAL (bootstrap)
