@@ -102,23 +102,32 @@ Só informativo — a seção 1 corrige nos dois casos. `false` confirma a suspe
 
 ## Parte 1 — O script
 
-Roda inteiro dentro de **uma transação**: se qualquer comando falhar, nada é aplicado e
-produção fica exatamente como estava. DDL no Postgres é transacional, então isso vale
-para tabelas, funções, policies e índices igualmente.
+**Cole tudo de uma vez, numa única execução.** Uma transação vive dentro de uma
+conexão, e o SQL Editor do Supabase pega uma conexão nova a cada *Run* — rodar
+`begin;` num *Run* e `commit;` em outro deixa o primeiro órfão, e tudo que veio depois
+dele volta atrás quando a conexão é devolvida. É por isso que aqui é um bloco só, com
+as explicações de cada seção como comentário dentro dele.
 
-> Se o SQL Editor reclamar de `there is already a transaction in progress`, é aviso, não
-> erro — pode seguir. Se preferir, remova o `begin;`/`commit;` e rode as seções na ordem.
+Se qualquer comando falhar, nada é aplicado e produção fica exatamente como estava —
+DDL no Postgres é transacional, e isso vale para tabelas, funções, policies e índices
+igualmente.
+
+**Rodar de novo é seguro.** Todo comando é repetível: `create or replace`,
+`create table if not exists`, `drop policy if exists` antes de cada `create policy`, e
+`on conflict do nothing` no backfill e no motivo. Uma tentativa que falhou no meio não
+deixa resíduo, e uma que rodou pela metade pode ser repetida do começo.
 
 ```sql
 begin;
-```
 
-### 1. Pendência da feature de ajuste
+-- ==============================================================
+-- 1. Pendencia da feature de ajuste
+--
+-- A view deixa de contar ajuste como consumo e o motivo passa a
+-- existir com certeza. Os dois sao idempotentes: se o
+-- migracao_ajuste_estoque.sql ja rodou aqui, nada muda.
+-- ==============================================================
 
-A view deixa de contar ajuste como consumo, e o motivo passa a existir com certeza. Os
-dois são idempotentes.
-
-```sql
 create or replace view vw_consumo_30_dias as
 with consumo as (
   select
@@ -170,11 +179,11 @@ left join consumo   co on co.produto_id = s.produto_id
 insert into motivos_movimentacao (codigo, descricao)
 values ('ajuste', 'Ajuste de inventário')
 on conflict (codigo) do nothing;
-```
 
-### 2. Estrutura de acesso por local
+-- ==============================================================
+-- 2. Estrutura de acesso por local
+-- ==============================================================
 
-```sql
 create table if not exists usuarios_locais (
   usuario_id  uuid        not null,
   local_id    int         not null,
@@ -201,12 +210,15 @@ create index if not exists idx_usuarios_locais_local
 comment on table  usuarios_locais             is 'Quais locais cada usuário acessa e se pode gerenciar o estoque deles. Administradores não precisam de linhas aqui — fn_is_admin() concede acesso total.';
 comment on column usuarios_locais.pode_editar is 'false = somente leitura (visualizador). true = pode movimentar estoque e editar o mínimo neste local.';
 comment on column usuarios_locais.criado_por  is 'Admin que concedeu o acesso. Null quando veio da migração inicial.';
-```
 
-As três funções são `security definer` de propósito: precisam ler `usuarios_locais`
-ignorando o RLS da própria tabela, senão a checagem entraria em recursão.
+-- ==============================================================
+-- 3. Funcoes de permissao
+--
+-- security definer de proposito: precisam ler usuarios_locais
+-- ignorando o RLS da propria tabela, senao a checagem entraria
+-- em recursao.
+-- ==============================================================
 
-```sql
 create or replace function fn_pode_ver_local(p_local_id int)
 returns boolean language sql security definer stable as $$
   select fn_is_ativo() and (
@@ -249,14 +261,17 @@ $$;
 
 comment on function fn_pode_editar_algum_local() is
   'Retorna true se o usuário logado gerencia estoque em ao menos um local. Usada nas policies de produtos e apresentacoes, que são dados globais sem local_id.';
-```
 
-O `grant` não é decorativo. As outras tabelas herdaram os privilégios padrão do Supabase
-na criação do projeto; uma tabela criada por migração não herda nada, e sem ele o
-Postgres barra antes de avaliar o RLS, com
-`42501: permission denied for table usuarios_locais`.
+-- ==============================================================
+-- 4. Privilegios e RLS da usuarios_locais
+--
+-- O grant nao e decorativo. As outras tabelas herdaram os
+-- privilegios padrao do Supabase na criacao do projeto; uma
+-- tabela criada por migracao nao herda nada, e sem ele o Postgres
+-- barra antes de avaliar o RLS, com
+-- 42501: permission denied for table usuarios_locais.
+-- ==============================================================
 
-```sql
 grant select, insert, update, delete
   on public.usuarios_locais to authenticated;
 
@@ -272,26 +287,27 @@ create policy "admin gerencia acessos"
   on usuarios_locais for all to authenticated
   using (fn_is_admin())
   with check (fn_is_admin());
-```
 
-### 3. Backfill — preserva o acesso de quem já usa o sistema
+-- ==============================================================
+-- 5. Backfill - preserva o acesso de quem ja usa o sistema
+--
+-- Todo nao-admin recebe gestao de todos os locais, que e o que ele
+-- ja tinha antes desta migracao. Ninguem perde acesso no instante
+-- em que o script roda; o admin restringe depois, pela aba
+-- Acessos, com o sistema no ar.
+-- ==============================================================
 
-Todo não-admin recebe gestão de todos os locais, que é exatamente o que ele já tinha
-antes desta migração. **Ninguém perde acesso no instante em que o script roda.** Depois
-disso o admin restringe pela aba Acessos, com o sistema no ar.
-
-```sql
 insert into usuarios_locais (usuario_id, local_id, pode_editar)
 select p.id, l.id, true
 from perfis p
 cross join locais l
 where p.is_admin = false
 on conflict (usuario_id, local_id) do nothing;
-```
 
-### 4. Leitura restrita ao local
+-- ==============================================================
+-- 6. Leitura restrita ao local
+-- ==============================================================
 
-```sql
 -- 1.1 locais — o usuário só enxerga os locais que lhe foram concedidos.
 -- Isso faz o seletor da TopBar se filtrar sozinho, sem mudar o frontend.
 drop policy if exists "autenticados podem ler locais" on locais;
@@ -316,11 +332,11 @@ create policy "usuario le movimentacoes dos locais permitidos"
         and fn_pode_ver_local(e.local_id)
     )
   );
-```
 
-### 5. Escrita exige gestão do local
+-- ==============================================================
+-- 7. Escrita exige gestao do local
+-- ==============================================================
 
-```sql
 -- 2.1 produtos — global, sem local_id: exige gestão em algum local.
 drop policy if exists "ativos podem inserir produtos" on produtos;
 create policy "gestores podem inserir produtos"
@@ -340,24 +356,29 @@ drop policy if exists "ativos podem inserir estoques" on estoques;
 create policy "gestores podem inserir estoques"
   on estoques for insert to authenticated
   with check (fn_pode_editar_local(local_id));
-```
 
-Criar local vira exclusivo de admin. É **mudança de comportamento**: hoje qualquer
-usuário ativo consegue. O motivo é que quem cria não recebe acesso automático (não ganha
-linha em `usuarios_locais`), então o local sumiria da tela dele no instante seguinte.
+-- ==============================================================
+-- 8. Criar local vira exclusivo de admin
+--
+-- MUDANCA DE COMPORTAMENTO: hoje qualquer usuario ativo consegue.
+-- Quem cria nao recebe acesso automatico (nao ganha linha em
+-- usuarios_locais), entao o local sumiria da tela dele no
+-- instante seguinte.
+-- ==============================================================
 
-```sql
 drop policy if exists "ativos podem inserir locais" on locais;
 create policy "admin pode inserir locais"
   on locais for insert to authenticated
   with check (fn_is_admin());
-```
 
-Movimentações: exige gestão do local e mantém o ajuste restrito a admin. Esta é a policy
-que substitui a do `migracao_ajuste_estoque.sql`, com a regra do ajuste preservada — o
-`fn_is_ativo()` de lá está embutido dentro do `fn_pode_editar_local()`.
+-- ==============================================================
+-- 9. Movimentacoes - local + a regra de ajuste
+--
+-- Substitui a policy do migracao_ajuste_estoque.sql com a regra do
+-- ajuste preservada. O fn_is_ativo() de la esta embutido dentro do
+-- fn_pode_editar_local().
+-- ==============================================================
 
-```sql
 drop policy if exists "ativos podem inserir movimentacoes" on movimentacoes;
 create policy "gestores podem inserir movimentacoes"
   on movimentacoes for insert to authenticated
@@ -376,14 +397,15 @@ create policy "gestores podem inserir movimentacoes"
       or fn_is_admin()
     )
   );
-```
 
-### 6. Estoque mínimo por função, não por UPDATE na tabela
+-- ==============================================================
+-- 10. Estoque minimo por funcao, nao por UPDATE na tabela
+--
+-- RLS e por linha, nao por coluna. Dar UPDATE em estoques a um
+-- gerente daria junto o poder de reescrever quantidade_atual por
+-- fora do historico de movimentacoes.
+-- ==============================================================
 
-RLS é por linha, não por coluna. Dar UPDATE em `estoques` a um gerente daria junto o
-poder de reescrever `quantidade_atual` por fora do histórico de movimentações.
-
-```sql
 create or replace function fn_define_estoque_minimo(
   p_estoque_id int,
   p_valor      numeric
@@ -422,26 +444,27 @@ $$;
 
 comment on function fn_define_estoque_minimo(int, numeric) is
   'Altera o estoque mínimo de um estoque, se o usuário gerencia o local. Existe para não conceder UPDATE em estoques a não-admins, o que permitiria reescrever quantidade_atual por fora do histórico de movimentações.';
-```
 
-### 7. Views param de furar o RLS
+-- ==============================================================
+-- 11. Views param de furar o RLS
+--
+-- vw_sugestao_compra le de vw_consumo_30_dias: as duas precisam do
+-- flag. Se so a externa receber, a interna continua rodando como
+-- dona e o filtro nao propaga. Exige PostgreSQL 15+.
+-- ==============================================================
 
-`vw_sugestao_compra` lê de `vw_consumo_30_dias`: as duas precisam do flag. Se só a
-externa receber, a interna continua rodando como dona e o filtro não propaga.
-
-```sql
 alter view vw_consumo_30_dias         set (security_invoker = on);
 alter view vw_sugestao_compra         set (security_invoker = on);
 alter view vw_auditoria_movimentacoes set (security_invoker = on);
-```
 
-### 8. Saldo inicial com motivo próprio
+-- ==============================================================
+-- 12. Saldo inicial com motivo proprio
+--
+-- Corrige o bug em que nao-admin nao conseguia cadastrar produto
+-- com quantidade inicial maior que zero: a RPC gravava o saldo com
+-- motivo ajuste, que a policy da secao 9 restringe a admin.
+-- ==============================================================
 
-Corrige o bug em que não-admin não conseguia cadastrar produto com quantidade inicial
-maior que zero: a RPC gravava o saldo com motivo `ajuste`, que a policy da seção 5
-restringe a admin.
-
-```sql
 insert into motivos_movimentacao (codigo, descricao)
 values ('saldo_inicial', 'Saldo inicial do cadastro')
 on conflict (codigo) do nothing;
@@ -509,23 +532,21 @@ $$;
 
 comment on function fn_cria_produto_completo(text, int, jsonb) is
   'Cria produto, apresentações, estoques e saldo inicial em uma transação única. Usada pela tela de cadastro de produto.';
-```
 
-### 9. Unicidade de apresentação
+-- ==============================================================
+-- 13. Unicidade de apresentacao
+-- ==============================================================
 
-Falha se a Parte 0.3 tiver voltado alguma linha.
-
-```sql
 create unique index if not exists idx_apresentacoes_descricao_unica
   on apresentacoes (produto_id, lower(trim(descricao)));
 
 comment on index idx_apresentacoes_descricao_unica is
   'Impede duas apresentações com a mesma descrição no mesmo produto, ignorando caixa e espaços nas pontas.';
-```
 
-### 10. RPC de apresentações em produto que já existe
+-- ==============================================================
+-- 14. RPC de apresentacoes em produto que ja existe
+-- ==============================================================
 
-```sql
 create or replace function fn_adiciona_apresentacoes_produto(
   p_produto_id    int,
   p_apresentacoes jsonb
@@ -613,11 +634,47 @@ $$;
 
 comment on function fn_adiciona_apresentacoes_produto(int, jsonb) is
   'Adiciona apresentações (novas ou já existentes) e seus estoques a um produto que já existe, em transação única. Usada pela busca-antes-de-criar da tela de cadastro de produto.';
-```
 
-```sql
 commit;
 ```
+
+---
+
+## Se a Parte 1 falhar ou você rodar em pedaços
+
+Esta consulta diz o que existe agora. Ela é só leitura.
+
+```sql
+select
+  to_regclass('public.usuarios_locais')                                     as tabela,
+  (select count(*) from pg_proc
+     where proname in ('fn_pode_ver_local', 'fn_pode_editar_local',
+                       'fn_pode_editar_algum_local', 'fn_define_estoque_minimo',
+                       'fn_adiciona_apresentacoes_produto'))                as funcoes_novas,
+  (select count(*) from motivos_movimentacao
+     where codigo = 'saldo_inicial')                                        as motivo_saldo,
+  (select count(*) from pg_indexes
+     where indexname = 'idx_apresentacoes_descricao_unica')                 as indice_unico,
+  (select count(*) from pg_policies
+     where schemaname = 'public'
+       and policyname in ('usuario le locais permitidos',
+                          'usuario le estoques dos locais permitidos',
+                          'usuario le movimentacoes dos locais permitidos'))as policies_leitura,
+  (select count(*) from pg_policies
+     where schemaname = 'public'
+       and policyname like 'gestores podem inserir%')                       as policies_escrita;
+```
+
+Concluído: `tabela` = `usuarios_locais`, `funcoes_novas` = 5, `motivo_saldo` = 1,
+`indice_unico` = 1, `policies_leitura` = 3, `policies_escrita` = 4.
+
+Tudo zerado ou nulo significa que a transação voltou atrás inteira, que é o
+comportamento esperado — **não há resíduo para limpar, é só rodar a Parte 1 de novo**,
+desta vez em uma execução só.
+
+Valores no meio do caminho (parte sim, parte não) significam que o script foi rodado em
+pedaços, sem a transação. Também não é problema: a Parte 1 é repetível do começo, e o
+que já existe é recriado ou ignorado sem erro.
 
 ---
 
