@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import {
   Plus, Trash2, CheckCircle, ChevronLeft, Package, MapPin,
@@ -119,28 +119,39 @@ export default function CadastroProduto() {
   const [success, setSuccess]   = useState(false);
   const [erros, setErros]       = useState({});
 
+  /* Catálogo global — de propósito não filtra por local. É o que permite ver
+     que um produto já existe em outro estoque antes de duplicá-lo. O
+     aninhamento "estoques" respeita o RLS: só vêm os locais visíveis.
+
+     Está numa função própria porque precisa ser relido depois de cada
+     cadastro: sem isso, quem encadeia vários produtos compara o próximo
+     contra uma lista que não contém o que ele acabou de criar — justamente
+     o duplicado mais provável. Vale também para o modo "adicionar ao
+     estoque", que alimenta o marcador "já tem" dos locais. */
+  const carregarCatalogo = useCallback(async () => {
+    const { data } = await supabase
+      .from('produtos')
+      .select(`
+        id, nome,
+        categorias (nome),
+        apresentacoes (
+          id, descricao, quantidade_unitaria, unidade_id,
+          unidades (sigla),
+          estoques (local_id)
+        )
+      `)
+      .order('nome');
+    if (data) setCatalogo(data);
+  }, []);
+
   /* ────────────────────────────────────────── */
   useEffect(() => {
     async function fetchDados() {
-      const [{ data: cats }, { data: units }, { data: prods }] =
+      const [{ data: cats }, { data: units }] =
         await Promise.all([
           supabase.from('categorias').select('id, nome').order('nome'),
           supabase.from('unidades').select('id, sigla, nome').order('sigla'),
-          /* Catálogo global — de propósito não filtra por local. É o que permite
-             ver que um produto já existe em outro estoque antes de duplicá-lo.
-             O aninhamento "estoques" respeita o RLS: só vêm os locais visíveis. */
-          supabase
-            .from('produtos')
-            .select(`
-              id, nome,
-              categorias (nome),
-              apresentacoes (
-                id, descricao, quantidade_unitaria, unidade_id,
-                unidades (sigla),
-                estoques (local_id)
-              )
-            `)
-            .order('nome'),
+          carregarCatalogo(),
         ]);
 
       if (cats)  setCategorias(cats);
@@ -148,11 +159,10 @@ export default function CadastroProduto() {
         setUnidades(units);
         setApresentacoes([emptyApresentacao(units)]);
       }
-      if (prods) setCatalogo(prods);
       setLoadingDados(false);
     }
     fetchDados();
-  }, []);
+  }, [carregarCatalogo]);
 
   /* ── Pré-seleciona o local da barra superior nas apresentações sem local ──
      Depende de loadingDados porque fetchDados recria a apresentação inicial. */
@@ -411,6 +421,9 @@ export default function CadastroProduto() {
 
   /* ── Reset para novo cadastro ── */
   const resetForm = () => {
+    /* Sem await: a busca só sugere a partir de dois caracteres digitados,
+       então a lista nova chega antes de o painel abrir. */
+    carregarCatalogo();
     setNomeProduto('');
     setCategoriaId('');
     setProdutoSel(null);

@@ -3,7 +3,7 @@
 Registro do que o `npx eslint src` acusa hoje, para limpar de uma vez depois que
 a refatoração de acesso por local terminar.
 
-**Estado em 31/08/2026:** 17 erros e 1 aviso, em 10 arquivos.
+**Estado em 09/09/2026:** 17 erros e 1 aviso, em 10 arquivos.
 Nenhum quebra o build — `npx vite build` passa limpo.
 
 ```
@@ -31,10 +31,10 @@ Onde aparece:
 
 | Arquivo | Linhas |
 |---|---|
-| `src/pages/Movimentacoes.jsx` | 278, 297, 318, 338 |
+| `src/pages/Movimentacoes.jsx` | 285, 304, 325, 345 |
 | `src/pages/Configuracoes.jsx` | 500, 741 |
 | `src/pages/Historico.jsx` | 84, 87 |
-| `src/pages/CadastroProduto.jsx` | 160 |
+| `src/pages/CadastroProduto.jsx` | 171 |
 | `src/pages/Compras.jsx` | 25 |
 | `src/pages/ProdutoDetalhe.jsx` | 68 |
 | `src/components/TabelaCrud.jsx` | 66 |
@@ -75,7 +75,7 @@ Correção de uma linha.
 
 ## 4. `react-hooks/exhaustive-deps` — 1 aviso — **NÃO CORRIGIR**
 
-`src/pages/Movimentacoes.jsx:340`
+`src/pages/Movimentacoes.jsx:347`
 
 ```jsx
 useEffect(() => {
