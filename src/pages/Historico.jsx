@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useLocal } from '../contexts/LocalContext';
-import { Search, ArrowDownCircle, ArrowUpCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { Search, ArrowDownCircle, ArrowUpCircle, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
+import { ConfirmDialog, traduzErro } from '../components/TabelaCrud';
+import { useToast } from '../lib/toast';
 
 const PAGE_SIZE = 20;
 
@@ -30,12 +33,27 @@ function formatarData(iso) {
   });
 }
 
+/* Descreve a consequência antes de confirmar. Uma pergunta só com "tem
+   certeza?" não deixa o admin perceber que o saldo do local também muda. */
+function mensagemExclusao(r) {
+  const qtd = Number(r.quantidade);
+  const emb = qtd === 1 ? 'embalagem' : 'embalagens';
+  const acao = r.tipo === 'entrada' ? 'entrada' : 'saída';
+  const efeito = r.tipo === 'entrada' ? 'reduzido' : 'aumentado';
+  return `Excluir esta ${acao} de ${qtd} ${emb} de ${r.produto} (${r.apresentacao})? `
+    + `O saldo em ${r.local} será ${efeito} em ${qtd} ${emb}, e a movimentação sai `
+    + `do histórico permanentemente.`;
+}
+
 export default function Historico() {
   const { localAtual, loadingLocal } = useLocal();
+  const { isAdmin } = useAuth();
+  const toast = useToast();
   const [rows, setRows]         = useState([]);
   const [total, setTotal]       = useState(0);
   const [loading, setLoading]   = useState(true);
   const [pagina, setPagina]     = useState(0);
+  const [confirmacao, setConfirmacao] = useState(null);
 
   /* filtros */
   const [busca, setBusca]       = useState('');
@@ -86,7 +104,46 @@ export default function Historico() {
   /* resetar página ao mudar filtros ou local */
   useEffect(() => { setPagina(0); }, [filtroTipo, filtroInicio, filtroFim, busca, localAtual]);
 
+  /* A exclusão apaga a linha do histórico; o saldo é devolvido pelo trigger
+     tg_reverte_estoque, não por uma segunda chamada daqui — se fosse em duas
+     etapas, uma falha na segunda deixaria o estoque errado. */
+  const excluir = (r) => {
+    setConfirmacao({
+      mensagem: mensagemExclusao(r),
+      onConfirm: async () => {
+        setConfirmacao(null);
+
+        /* O .select() existe porque o RLS recusa DELETE em silêncio: sem ele o
+           PostgREST devolve sucesso com zero linhas e a tela mentiria. */
+        const { data, error } = await supabase
+          .from('movimentacoes')
+          .delete()
+          .eq('id', r.id)
+          .select('id');
+
+        if (error) {
+          /* O trigger levanta mensagem própria em português (saldo negativo);
+             traduzErro só entra se vier erro de transporte. */
+          toast.erro(error.message || traduzErro(error));
+          return;
+        }
+        if (!data || data.length === 0) {
+          toast.erro('Nada foi excluído — apenas administradores podem excluir movimentações.');
+          return;
+        }
+
+        toast.sucesso('Movimentação excluída e saldo corrigido.');
+
+        /* Era a única linha da página: volta uma, senão o admin fica olhando
+           uma página vazia. Mudar a página já dispara o refetch pelo efeito. */
+        if (rows.length === 1 && pagina > 0) setPagina(p => p - 1);
+        else fetchHistorico();
+      },
+    });
+  };
+
   const totalPaginas = Math.ceil(total / PAGE_SIZE);
+  const totalColunas = isAdmin ? 9 : 8;
 
   return (
     <div className="flex flex-col gap-5">
@@ -168,6 +225,13 @@ export default function Historico() {
 
       {/* Tabela */}
       <div className="card overflow-hidden">
+        {confirmacao && (
+          <ConfirmDialog
+            mensagem={confirmacao.mensagem}
+            onConfirm={confirmacao.onConfirm}
+            onCancel={() => setConfirmacao(null)}
+          />
+        )}
         <div className="table-wrapper border-none rounded-none">
           <table className="table-clean">
             <thead>
@@ -180,18 +244,19 @@ export default function Historico() {
                 <th>Unidade</th>
                 <th>Motivo</th>
                 <th>Usuário</th>
+                {isAdmin && <th className="text-right w-16">Ações</th>}
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-10 text-app-text-secondary text-[13px]">
+                  <td colSpan={totalColunas} className="text-center py-10 text-app-text-secondary text-[13px]">
                     Carregando...
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan="8" className="text-center py-10 text-app-text-secondary text-[13px]">
+                  <td colSpan={totalColunas} className="text-center py-10 text-app-text-secondary text-[13px]">
                     Nenhuma movimentação encontrada neste local.
                   </td>
                 </tr>
@@ -206,6 +271,17 @@ export default function Historico() {
                     <td className="text-[12px] text-app-text-secondary">{r.unidade}</td>
                     <td className="text-[12px]">{r.motivo_descricao ?? '—'}</td>
                     <td className="text-[12px] text-app-text-secondary">{r.usuario}</td>
+                    {isAdmin && (
+                      <td className="text-right">
+                        <button
+                          onClick={() => excluir(r)}
+                          title="Excluir movimentação"
+                          className="p-1.5 rounded-lg hover:bg-rose-50 text-app-text-label hover:text-rose-500 transition-colors print:hidden"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}

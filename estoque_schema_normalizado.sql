@@ -321,6 +321,67 @@ after insert on movimentacoes
 for each row execute function fn_atualiza_estoque();
 
 -- -------------------------------------------------------------
+-- 11.1 TRIGGER — devolve o saldo quando a movimentação é excluída
+--      Espelho do trigger acima. Fica num trigger, e não numa RPC,
+--      para que qualquer caminho que apague uma movimentação devolva
+--      o saldo — inclusive um delete manual no SQL Editor. Só admin
+--      chega aqui (ver a policy de delete na seção 17).
+-- -------------------------------------------------------------
+create or replace function fn_reverte_estoque()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_saldo numeric;
+  v_novo  numeric;
+begin
+  -- for update trava a linha do estoque até o fim da transação. Sem a trava,
+  -- uma movimentação registrada em paralelo entraria entre esta leitura e o
+  -- update abaixo, e o valor absoluto gravado aqui apagaria o efeito dela.
+  select quantidade_atual into v_saldo
+    from estoques
+   where id = OLD.estoque_id
+     for update;
+
+  if not found then
+    return OLD;   -- estoque já removido na mesma transação; nada a devolver
+  end if;
+
+  v_novo := case OLD.tipo
+              when 'entrada' then v_saldo - OLD.quantidade
+              else                v_saldo + OLD.quantidade
+            end;
+
+  -- Entrada de 10, saída de 8, e alguém exclui a entrada: o saldo iria a -8.
+  -- Recusar é o certo — se aquela entrada nunca existiu, a saída também não
+  -- poderia ter acontecido, e adivinhar qual dos dois corrigir não é trabalho
+  -- do banco. O ajuste de contagem física resolve sem apagar histórico.
+  if v_novo < 0 then
+    raise exception
+      'Excluir esta movimentação deixaria o saldo em %. Houve movimentações posteriores que dependem dela — corrija com um ajuste de contagem física em vez de excluir.',
+      v_novo
+      using errcode = '23514';
+  end if;
+
+  update estoques
+     set quantidade_atual = v_novo,
+         atualizado_em    = now()
+   where id = OLD.estoque_id;
+
+  return OLD;
+end;
+$$;
+
+create trigger tg_reverte_estoque
+after delete on movimentacoes
+for each row execute function fn_reverte_estoque();
+
+comment on function fn_reverte_estoque() is
+  'Devolve ao estoque o efeito de uma movimentação excluída: entrada subtrai, saída soma. Espelho de fn_atualiza_estoque. Recusa a exclusão se o saldo ficaria negativo.';
+
+-- -------------------------------------------------------------
 -- 12. VIEW — consumo por produto nos últimos 30 dias
 --     Ajustada para usar motivo_id em vez de texto livre.
 --     Os códigos 'descarte' e 'ajuste' são filtrados via join na
@@ -717,6 +778,13 @@ create policy "admin pode deletar apresentacoes"
 
 create policy "admin pode deletar estoques"
   on estoques for delete to authenticated
+  using (fn_is_admin());
+
+-- Exclusão de movimentação é de admin: apaga uma linha do histórico, e o
+-- trigger tg_reverte_estoque (11.1) devolve o efeito dela ao saldo. Sem
+-- checagem de local — admin já enxerga e gerencia todos eles.
+create policy "admin pode deletar movimentacoes"
+  on movimentacoes for delete to authenticated
   using (fn_is_admin());
 
 -- UPDATE direto em estoques é só de admin, e de propósito: RLS é por linha,
