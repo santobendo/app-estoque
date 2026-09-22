@@ -80,6 +80,10 @@ begin
 end;
 $$;
 
+-- create trigger não tem "or replace": sem o drop, rodar de novo falharia com
+-- "trigger already exists". Importa para a execução em produção.
+drop trigger if exists tg_reverte_estoque on movimentacoes;
+
 create trigger tg_reverte_estoque
 after delete on movimentacoes
 for each row execute function fn_reverte_estoque();
