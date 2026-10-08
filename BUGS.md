@@ -129,7 +129,7 @@ As policies de SELECT exigiam só `authenticated`, sem checar `fn_is_ativo()`.
 A tela "Conta desativada" cobria o uso normal, mas alguém com o token podia
 consultar a API diretamente.
 
-Resolvido pela refatoração de acesso por local (`migracoes/02_...md`):
+Resolvido pela refatoração de acesso por local:
 `locais`, `estoques` e `movimentacoes` passaram a filtrar por
 `fn_pode_ver_local()`, que exige `fn_is_ativo()`. As três views ganharam
 `security_invoker = on`, então também param de vazar.

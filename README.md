@@ -13,9 +13,9 @@ No SQL Editor do Supabase, rode:
 2. `seed_demo.sql` (opcional) — produtos e locais fictícios para ter o que ver nas telas.
    **Só em banco de testes.**
 
-O schema já inclui todas as migrações. Os arquivos em `migracoes/` e
-`migracao_ajuste_estoque.sql` servem apenas para atualizar bancos criados com versões
-antigas do schema — num banco novo, não rode.
+O schema já inclui todas as migrações, então é só esse arquivo — não há migração avulsa
+para aplicar depois. A pasta `migracoes/` está vazia por isso; o README dela explica
+como recuperar uma migração antiga do histórico do git, se precisar.
 
 Login inicial: `admin@estoque.com` / `estoque`. Troque a senha depois do primeiro acesso.
 
