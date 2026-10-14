@@ -31,7 +31,7 @@ Onde aparece:
 
 | Arquivo | Linhas |
 |---|---|
-| `src/pages/Movimentacoes.jsx` | 283, 302, 323, 343 |
+| `src/pages/Movimentacoes.jsx` | 353, 372, 393, 413 |
 | `src/pages/Configuracoes.jsx` | 500, 741 |
 | `src/pages/Historico.jsx` | 132, 135 |
 | `src/pages/CadastroProduto.jsx` | 168 |
@@ -75,7 +75,7 @@ Correção de uma linha.
 
 ## 4. `react-hooks/exhaustive-deps` — 1 aviso — **NÃO CORRIGIR**
 
-`src/pages/Movimentacoes.jsx:345`
+`src/pages/Movimentacoes.jsx:415`
 
 ```jsx
 useEffect(() => {

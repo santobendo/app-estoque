@@ -9,30 +9,12 @@ import {
 } from 'lucide-react';
 import { traduzErro } from '../components/TabelaCrud';
 import Kbd from '../components/Kbd';
+import { Label, SectionHeader } from '../components/Secao';
+import SecaoRequisicao from '../components/SecaoRequisicao';
 import { useToast } from '../lib/toast';
 import { normalizar } from '../lib/texto';
 
 /* ─── helpers ─── */
-function Label({ children, required }) {
-  return (
-    <label className="text-[11px] font-bold text-app-text-label uppercase tracking-widest">
-      {children}{required && <span className="text-rose-500 ml-0.5">*</span>}
-    </label>
-  );
-}
-
-function SectionHeader({ number, title, subtitle }) {
-  return (
-    <div className="px-6 py-4 border-b border-app-border-inner flex items-center gap-3">
-      <span className="w-6 h-6 rounded-full bg-app-text text-white flex items-center justify-center text-[11px] font-bold shrink-0">
-        {number}
-      </span>
-      <span className="text-[13px] font-bold text-app-text uppercase tracking-wide">{title}</span>
-      {subtitle && <span className="text-[11px] text-app-text-secondary">{subtitle}</span>}
-    </div>
-  );
-}
-
 function Spinner() {
   return (
     <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -52,6 +34,11 @@ function Spinner() {
    ida ao servidor a cada letra a navegação por teclado fica intragável, e
    o ilike ainda ignora acento ("acucar" não achava "AÇÚCAR"). */
 const MAX_RESULTADOS = 10;
+
+/* A requisição ativa vive no sessionStorage, não só na memória da tela: um F5
+   no meio de uma requisição de 15 itens começaria outra e partiria a original
+   em duas. Morre ao fechar a aba, que é o fim natural do trabalho. */
+const CHAVE_REQ = 'requisicao_ativa';
 
 function ProdutoBusca({ valor, onValorChange, onSelect, erro, inputRef }) {
   const [catalogo, setCatalogo]       = useState([]);
@@ -235,7 +222,7 @@ function ProdutoBusca({ valor, onValorChange, onSelect, erro, inputRef }) {
    Página principal
 ═══════════════════════════════════════════ */
 export default function Movimentacoes() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, perfil } = useAuth();
   const { localAtual, podeEditarAtual } = useLocal();
   const toast = useToast();
 
@@ -262,10 +249,97 @@ export default function Movimentacoes() {
   const [quantidadeContada, setQuantidadeContada] = useState('');
   const [data, setData]                 = useState(() => new Date().toISOString().slice(0, 16));
 
+  /* ── requisição ──
+     opcao: 'nova' | 'existente' | 'sem'. O padrão é 'sem' para a tela abrir
+     se comportando exatamente como antes; quem vai trabalhar por requisição
+     escolhe no primeiro clique. Quando houver tela de parâmetros, este default
+     é o primeiro candidato a virar configuração do admin. */
+  const [opcaoReq, setOpcaoReq] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(CHAVE_REQ) ?? 'null')?.opcao ?? 'sem';
+    } catch {
+      return 'sem';
+    }
+  });
+  const [requisicao, setRequisicao]       = useState(null);
+  const [itensReq, setItensReq]           = useState([]);
+  const [versaoItens, setVersaoItens]     = useState(0);
+  const [qtdSolicitada, setQtdSolicitada] = useState('');
+  const [usuarios, setUsuarios]           = useState([]);
+  const [digitadoPor, setDigitadoPor]     = useState('');
+  const [entreguePor, setEntreguePor]     = useState('');
+
+  /* O padrão dos dois responsáveis é quem está operando. Derivado em vez de
+     semeado por efeito: o perfil chega depois do primeiro render, e um efeito
+     só para copiar user.id para o estado seria render em cascata. */
+  const digitadoEfetivo = digitadoPor || user?.id || '';
+  const entregueEfetivo = entreguePor || user?.id || '';
+
   /* ── estado ── */
   const [loading, setLoading]   = useState(false);
   const [erros, setErros]       = useState({});
   const [estoqueAtual, setEstoqueAtual] = useState(null);
+
+  /* Por ora o fluxo de requisição é só de administrador, como combinado. O
+     banco já aceita gerente de local (as policies filtram os itens por
+     local), então liberar depois é apagar o isAdmin desta linha — não precisa
+     de migração. */
+  const mostraRequisicao = isAdmin && modo === 'movimento' && tipo === 'saida';
+  const comRequisicao    = mostraRequisicao && opcaoReq !== 'sem';
+
+  /* ─ Lista de usuários para os selects de responsável (só admin escolhe outra
+       pessoa; a policy do cabeçalho exige o mesmo, então não dá para burlar
+       pela API) ─ */
+  useEffect(() => {
+    if (!isAdmin) return;
+    supabase.from('perfis').select('id, nome').eq('ativo', true).order('nome')
+      .then(({ data }) => { if (data) setUsuarios(data); });
+  }, [isAdmin]);
+
+  /* ─ Restaura a requisição ativa depois de um F5 ─
+     Se ela não voltar (foi excluída, ou o usuário perdeu acesso), a sessão é
+     limpa em silêncio — insistir num número morto seria pior. */
+  useEffect(() => {
+    let salvo = null;
+    try { salvo = JSON.parse(sessionStorage.getItem(CHAVE_REQ) ?? 'null'); } catch { salvo = null; }
+    if (!salvo?.id) return;
+
+    let vivo = true;
+    supabase.from('vw_requisicoes').select('*').eq('id', salvo.id).maybeSingle()
+      .then(({ data }) => {
+        if (!vivo) return;
+        if (data) setRequisicao(data);
+        else { setOpcaoReq('sem'); try { sessionStorage.removeItem(CHAVE_REQ); } catch { /* modo privado */ } }
+      });
+    return () => { vivo = false; };
+  }, []);
+
+  /* ─ Guarda a requisição ativa ─
+     O primeiro render é ignorado de propósito: ele rodaria com o estado
+     inicial e apagaria o id que o efeito de restauração ainda vai buscar. */
+  const primeiroRender = useRef(true);
+  useEffect(() => {
+    if (primeiroRender.current) { primeiroRender.current = false; return; }
+    try {
+      if (opcaoReq === 'sem') sessionStorage.removeItem(CHAVE_REQ);
+      else sessionStorage.setItem(CHAVE_REQ, JSON.stringify({ opcao: opcaoReq, id: requisicao?.id ?? null }));
+    } catch { /* aba privada sem storage: a requisição ainda funciona nesta tela */ }
+  }, [opcaoReq, requisicao]);
+
+  /* ─ Itens já lançados na requisição ativa ─
+     Depende do id e de versaoItens: o contador é incrementado depois de cada
+     gravação, que é o que faz a lista e o total de entregue se atualizarem. */
+  useEffect(() => {
+    if (!requisicao?.id) return;
+    let vivo = true;
+    /* Ordem explícita, não a da view: o primeiro da lista é o último
+       lançamento, e é ele que a seção mostra recolhida. */
+    supabase.from('vw_requisicao_itens').select('*')
+      .eq('requisicao_id', requisicao.id)
+      .order('criado_em', { ascending: false })
+      .then(({ data }) => { if (vivo) setItensReq(data ?? []); });
+    return () => { vivo = false; };
+  }, [requisicao?.id, versaoItens]);
 
   /* ─ Carrega motivos ─
      Não define motivoId aqui: o motivo padrão depende do tipo e da lista
@@ -349,6 +423,46 @@ export default function Movimentacoes() {
     ? Number(quantidadeContada) - estoqueAtual
     : null;
 
+  /* ─ O produto já está nesta requisição? ─
+     Se sim, a saída entra como outra entrega do mesmo item e a solicitada não
+     é perguntada de novo: ela foi definida na primeira vez. Isso evita o item
+     duplicado e a pergunta "quanto foi pedido?" duas vezes para a mesma
+     coisa. */
+  /* Filtra pelo id em vez de limpar o estado ao trocar de requisição: os itens
+     da anterior ficariam piscando na tela até a nova consulta voltar. */
+  const itensVisiveis = useMemo(
+    () => (requisicao ? itensReq.filter(i => i.requisicao_id === requisicao.id) : []),
+    [itensReq, requisicao],
+  );
+
+  const itemExistente = useMemo(() => {
+    if (!comRequisicao || !apresentacaoId || !localAtual) return null;
+    return itensVisiveis.find(i =>
+      i.apresentacao_id === Number(apresentacaoId) && i.local_id === localAtual.id) ?? null;
+  }, [comRequisicao, itensVisiveis, apresentacaoId, localAtual]);
+
+  /* Trocar o tipo encerra a requisição, como especificado: ela agrupa as
+     saídas de um pedido, e entrada ou ajuste não fazem parte dele. Fica nos
+     handlers dos cartões, e não num efeito, porque é consequência do clique. */
+  const encerrarRequisicao = () => {
+    setOpcaoReq('sem');
+    setRequisicao(null);
+    setQtdSolicitada('');
+  };
+
+  /* Trocar de opção descarta a requisição ativa: "nova" quer um número novo e
+     "sem requisição" quer baixa solta. Se for sem querer, a opção 2 traz a
+     requisição de volta em um clique — ela é a primeira da lista. */
+  const trocarOpcaoReq = (nova) => {
+    setOpcaoReq(nova);
+    setRequisicao(null);
+    setQtdSolicitada('');
+    setErros(e => {
+      const { requisicao: _r, solicitada: _s, ...resto } = e;
+      return resto;
+    });
+  };
+
   /* ─ Validação ─ */
   const validate = () => {
     const e = {};
@@ -367,6 +481,14 @@ export default function Movimentacoes() {
       if (tipo === 'saida' && estoqueAtual !== null && Number(quantidade) > estoqueAtual)
                             e.quantidade   = `Estoque insuficiente. Disponível: ${estoqueAtual}`;
     }
+
+    if (comRequisicao) {
+      if (opcaoReq === 'existente' && !requisicao)
+        e.requisicao = 'Escolha uma requisição existente ou mude para "Nova requisição".';
+      if (!itemExistente && (qtdSolicitada === '' || Number(qtdSolicitada) <= 0))
+        e.solicitada = 'Informe quanto foi solicitado.';
+    }
+
     setErros(e);
     return Object.keys(e).length === 0;
   };
@@ -376,6 +498,40 @@ export default function Movimentacoes() {
     e.preventDefault();
     if (!validate()) return;
     setLoading(true);
+
+    /* Saída com requisição vai pela RPC: cabeçalho (se for a primeira),
+       item e movimentação numa transação só. Fazer isso em três chamadas
+       deixaria requisição sem item se a segunda falhasse. */
+    if (comRequisicao) {
+      const { data: res, error } = await supabase.rpc('fn_registra_saida_requisicao', {
+        p_estoque_id:            Number(estoqueId),
+        p_quantidade:            Number(quantidade),
+        p_quantidade_solicitada: itemExistente ? null : Number(qtdSolicitada),
+        p_motivo_id:             motivoId ? Number(motivoId) : null,
+        p_data:                  new Date(data).toISOString(),
+        p_requisicao_id:         requisicao?.id ?? null,
+        p_digitado_por:          isAdmin ? (digitadoEfetivo || null) : null,
+        p_entregue_por:          isAdmin ? (entregueEfetivo || null) : null,
+      });
+
+      setLoading(false);
+
+      if (error) { toast.erro(traduzErro(error)); return; }
+
+      /* Requisição recém-criada: busca o cabeçalho para a seção poder mostrar
+         número, data e responsáveis já resolvidos pela view. */
+      if (res?.requisicao_id && res.requisicao_id !== requisicao?.id) {
+        const { data: cab } = await supabase
+          .from('vw_requisicoes').select('*').eq('id', res.requisicao_id).maybeSingle();
+        if (cab) setRequisicao(cab);
+      }
+      setVersaoItens(v => v + 1);
+
+      toast.sucesso(`Saída registrada na requisição #${res?.requisicao_id ?? ''}.`);
+      resetForm();
+      buscaRef.current?.focus();
+      return;
+    }
 
     let payload;
     if (modo === 'ajuste') {
@@ -446,8 +602,11 @@ export default function Movimentacoes() {
     setEstoqueId('');
     setQuantidade('');
     setQuantidadeContada('');
+    setQtdSolicitada('');
     setData(new Date().toISOString().slice(0, 16));
     setErros({});
+    /* A requisição ativa sobrevive ao reset, igual a modo e tipo: a próxima
+       saída é da mesma requisição até o usuário dizer o contrário. */
   };
 
   const apSelecionada = apresentacoes.find(a => String(a.id) === apresentacaoId);
@@ -517,7 +676,7 @@ export default function Movimentacoes() {
             </button>
             <button
               type="button"
-              onClick={() => { setModo('movimento'); setTipo('entrada'); }}
+              onClick={() => { setModo('movimento'); setTipo('entrada'); encerrarRequisicao(); }}
               className={`flex items-center gap-3 p-4 rounded-xl border-[1.5px] transition-all cursor-pointer ${
                 modo === 'movimento' && tipo === 'entrada'
                   ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
@@ -533,7 +692,7 @@ export default function Movimentacoes() {
             {isAdmin && (
               <button
                 type="button"
-                onClick={() => setModo('ajuste')}
+                onClick={() => { setModo('ajuste'); encerrarRequisicao(); }}
                 className={`flex items-center gap-3 p-4 rounded-xl border-[1.5px] transition-all cursor-pointer ${
                   modo === 'ajuste'
                     ? 'border-amber-400 bg-amber-50 text-amber-700'
@@ -550,9 +709,31 @@ export default function Movimentacoes() {
           </div>
         </div>
 
+        {/* ── Requisição ──
+            Entra antes do produto porque a decisão é anterior: a requisição é
+            o pedido, e o produto é um item dele. Só aparece em saída. */}
+        {mostraRequisicao && (
+          <SecaoRequisicao
+            numeroSecao="2"
+            opcao={opcaoReq}
+            onOpcaoChange={trocarOpcaoReq}
+            requisicao={requisicao}
+            onRequisicaoChange={setRequisicao}
+            itens={itensVisiveis}
+            isAdmin={isAdmin}
+            usuarios={usuarios}
+            nomeUsuario={perfil?.nome ?? 'você'}
+            digitadoPor={digitadoEfetivo}
+            onDigitadoPorChange={setDigitadoPor}
+            entreguePor={entregueEfetivo}
+            onEntreguePorChange={setEntreguePor}
+            erro={erros.requisicao}
+          />
+        )}
+
         {/* ── Produto ── */}
         <div className="card !overflow-visible h-[289px]">
-          <SectionHeader number="2" title="Produto" />
+          <SectionHeader number={mostraRequisicao ? '3' : '2'} title="Produto" />
           <div className="p-6 grid grid-cols-2 gap-4">
             <div className="col-span-2 flex flex-col gap-1.5">
               <Label required>Produto</Label>
@@ -620,7 +801,10 @@ export default function Movimentacoes() {
 
         {/* ── Detalhes ── */}
         <div className="card">
-          <SectionHeader number="3" title={modo === 'ajuste' ? 'Contagem Física' : 'Detalhes da Movimentação'} />
+          <SectionHeader
+            number={mostraRequisicao ? '4' : '3'}
+            title={modo === 'ajuste' ? 'Contagem Física' : 'Detalhes da Movimentação'}
+          />
           <div className="p-6 grid grid-cols-2 gap-4">
             {modo === 'ajuste' ? (
               <>
@@ -673,7 +857,7 @@ export default function Movimentacoes() {
             ) : (
               <>
                 <div className="flex flex-col gap-1.5">
-                  <Label required>Quantidade</Label>
+                  <Label required>{comRequisicao ? 'Quantidade entregue' : 'Quantidade'}</Label>
                   <input
                     type="number"
                     step="0.0001"
@@ -685,6 +869,39 @@ export default function Movimentacoes() {
                   />
                   {erros.quantidade && <span className="text-rose-500 text-[11px]">{erros.quantidade}</span>}
                 </div>
+
+                {/* Solicitada só existe com requisição. Quando o produto já
+                    está na requisição, ela foi definida na primeira entrega e
+                    aparece travada — perguntar de novo abriria a porta para
+                    dois valores diferentes para o mesmo pedido. */}
+                {comRequisicao && (
+                  <div className="flex flex-col gap-1.5">
+                    <Label required={!itemExistente}>Quantidade solicitada</Label>
+                    {itemExistente ? (
+                      <>
+                        <div className="input-base flex items-center bg-app-bg text-[13px] font-bold text-app-text">
+                          {Number(itemExistente.quantidade_solicitada)}
+                        </div>
+                        <span className="text-[11px] text-app-text-label">
+                          já definida nesta requisição — a entrega soma à anterior
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <input
+                          type="number"
+                          step="0.0001"
+                          min="0.0001"
+                          value={qtdSolicitada}
+                          onChange={e => setQtdSolicitada(e.target.value)}
+                          placeholder="Ex: 5"
+                          className={`input-base ${erros.solicitada ? 'border-rose-400' : ''}`}
+                        />
+                        {erros.solicitada && <span className="text-rose-500 text-[11px]">{erros.solicitada}</span>}
+                      </>
+                    )}
+                  </div>
+                )}
 
                 <div className="flex flex-col gap-1.5">
                   <Label required>Motivo</Label>
