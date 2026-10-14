@@ -257,6 +257,80 @@ comment on table  motivos_movimentacao        is 'Motivos possíveis para movime
 comment on column motivos_movimentacao.codigo is 'Código curto único: uso, descarte, compra, ajuste, outro. Usado em lógicas de negócio.';
 
 -- -------------------------------------------------------------
+-- 9.1 REQUISIÇÕES
+--     Cabeçalho + itens. Vem antes de movimentacoes porque a
+--     movimentação referencia o item (a entrega).
+--
+--     Uma requisição NÃO pertence a um local: o item 1 pode ser
+--     retirado no Almoxarifado e o item 2 na Cozinha. O local mora no
+--     item, e é dele que o RLS se agarra.
+-- -------------------------------------------------------------
+create table requisicoes (
+  id            serial      primary key,
+  digitado_por  uuid        not null,
+  entregue_por  uuid        not null,
+  criado_em     timestamptz not null default now(),
+  atualizado_em timestamptz not null default now(),
+
+  constraint requisicoes_digitado_por_fk
+    foreign key (digitado_por) references perfis(id) on delete restrict,
+
+  constraint requisicoes_entregue_por_fk
+    foreign key (entregue_por) references perfis(id) on delete restrict
+);
+
+-- Não existe coluna "data": criado_em já é a data de criação. Guardar as
+-- duas seria manter duas verdades para a mesma coisa, e elas divergem no dia
+-- em que alguém editar uma e não a outra. Quando a tela dedicada precisar de
+-- data escolhida à mão, aí sim entra uma coluna própria — o criado_em é
+-- auditoria e não deve ser reescrito.
+comment on table  requisicoes               is 'Cabeçalho da requisição. O id é o número exibido ao usuário. Uma requisição pode ter itens de locais diferentes.';
+comment on column requisicoes.digitado_por  is 'Quem digitou o pedido. Só admin pode indicar outra pessoa.';
+comment on column requisicoes.entregue_por  is 'Quem entregou os itens. Só admin pode indicar outra pessoa.';
+comment on column requisicoes.criado_em     is 'Data de criação da requisição — é a data da requisição, não existe coluna separada para isso.';
+comment on column requisicoes.atualizado_em is 'Atualizada por trigger a cada item ou entrega. Ordena o modal de requisições existentes.';
+
+-- O item aponta para apresentação + local, não para a movimentação, porque a
+-- tela dedicada vai criar o item ANTES de existir qualquer entrega: pedir 10
+-- hoje, entregar 8 amanhã e 2 depois. O item tem que poder existir com zero
+-- movimentações e aceitar mais de uma.
+create table requisicao_itens (
+  id                    serial        primary key,
+  requisicao_id         int           not null,
+  apresentacao_id       int           not null,
+  local_id              int           not null,
+  quantidade_solicitada numeric(12,4) not null,
+  criado_em             timestamptz   not null default now(),
+
+  constraint requisicao_itens_solicitada_positiva
+    check (quantidade_solicitada > 0),
+
+  constraint requisicao_itens_requisicao_fk
+    foreign key (requisicao_id) references requisicoes(id) on delete cascade,
+
+  constraint requisicao_itens_apresentacao_fk
+    foreign key (apresentacao_id) references apresentacoes(id) on delete restrict,
+
+  constraint requisicao_itens_local_fk
+    foreign key (local_id) references locais(id) on delete restrict
+);
+
+comment on table  requisicao_itens                       is 'Itens de uma requisição: o que foi pedido, em qual local e quanto. A quantidade entregue não é coluna — é a soma das movimentações vinculadas ao item.';
+comment on column requisicao_itens.local_id              is 'Local de retirada do item. É o que permite RLS por local em uma requisição que cruza locais.';
+comment on column requisicao_itens.quantidade_solicitada is 'Quanto foi pedido, em embalagens. Pode divergir da entregue — pediu 10, tinha 8.';
+
+-- Um produto aparece uma vez por requisição e local: a segunda retirada do
+-- mesmo item entra como outra movimentação, não como item novo (a entregue é
+-- soma, então acumula sozinha). Único para que duas abas disputando não
+-- criem itens duplicados.
+create unique index idx_requisicao_itens_unico
+  on requisicao_itens (requisicao_id, apresentacao_id, local_id);
+
+create index idx_requisicao_itens_requisicao on requisicao_itens (requisicao_id);
+create index idx_requisicao_itens_local      on requisicao_itens (local_id);
+create index idx_requisicoes_atualizado      on requisicoes (atualizado_em desc);
+
+-- -------------------------------------------------------------
 -- 10. MOVIMENTAÇÕES
 --     Registro imutável de cada entrada ou saída.
 --     motivo_id substitui o antigo campo texto livre "motivo".
@@ -273,6 +347,9 @@ create table movimentacoes (
   data        timestamptz       not null default now(),
   criado_em   timestamptz       not null default now(),
 
+  -- Null em movimentação sem requisição, que continua sendo o caso normal.
+  requisicao_item_id int,
+
   constraint movimentacoes_quantidade_positiva
     check (quantidade > 0),
 
@@ -283,13 +360,21 @@ create table movimentacoes (
     foreign key (criado_por) references auth.users(id) on delete restrict,
 
   constraint movimentacoes_motivo_id_fk
-    foreign key (motivo_id) references motivos_movimentacao(id) on delete set null
+    foreign key (motivo_id) references motivos_movimentacao(id) on delete set null,
+
+  -- on delete set null: apagar um item de requisição não apaga histórico de
+  -- estoque. No sentido contrário não há efeito nenhum — excluir a
+  -- movimentação deixa o item em pé com entregue zero, que é a leitura
+  -- correta de "foi pedido e não foi entregue".
+  constraint movimentacoes_requisicao_item_fk
+    foreign key (requisicao_item_id) references requisicao_itens(id) on delete set null
 );
 
 comment on table  movimentacoes            is 'Registro imutável de entradas e saídas de estoque.';
 comment on column movimentacoes.criado_por is 'Usuário responsável pela movimentação — obrigatório.';
 comment on column movimentacoes.motivo_id  is 'FK para motivos_movimentacao — substitui o antigo campo texto livre.';
 comment on column movimentacoes.data       is 'Data/hora do evento real (pode diferir de criado_em).';
+comment on column movimentacoes.requisicao_item_id is 'Item de requisição atendido por esta movimentação. Null em movimentação sem requisição.';
 
 -- -------------------------------------------------------------
 -- 11. TRIGGER — atualiza quantidade_atual em estoques
@@ -380,6 +465,55 @@ for each row execute function fn_reverte_estoque();
 
 comment on function fn_reverte_estoque() is
   'Devolve ao estoque o efeito de uma movimentação excluída: entrada subtrai, saída soma. Espelho de fn_atualiza_estoque. Recusa a exclusão se o saldo ficaria negativo.';
+
+-- -------------------------------------------------------------
+-- 11.2 TRIGGER — atualizado_em da requisição
+--      É o que o modal de "requisições existentes" usa para ordenar por
+--      última alteração. Dispara nos dois eventos que são alteração na
+--      prática: item novo e entrega nova.
+--
+--      security definer porque NÃO existe policy de UPDATE em requisicoes
+--      para não-admin, de propósito: dar UPDATE ao usuário comum deixaria
+--      ele trocar os responsáveis de qualquer requisição. O trigger toca
+--      uma coluna só.
+-- -------------------------------------------------------------
+create or replace function fn_toca_requisicao()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_requisicao_id int;
+begin
+  if tg_table_name = 'requisicao_itens' then
+    v_requisicao_id := new.requisicao_id;
+  else
+    select requisicao_id into v_requisicao_id
+      from requisicao_itens where id = new.requisicao_item_id;
+  end if;
+
+  if v_requisicao_id is not null then
+    update requisicoes set atualizado_em = now() where id = v_requisicao_id;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger tg_toca_requisicao_item
+  after insert on requisicao_itens
+  for each row
+  execute function fn_toca_requisicao();
+
+create trigger tg_toca_requisicao_entrega
+  after insert on movimentacoes
+  for each row
+  when (new.requisicao_item_id is not null)
+  execute function fn_toca_requisicao();
+
+comment on function fn_toca_requisicao() is
+  'Atualiza requisicoes.atualizado_em quando entra um item ou uma entrega. Security definer porque usuário comum não tem UPDATE em requisicoes.';
 
 -- -------------------------------------------------------------
 -- 12. VIEW — consumo por produto nos últimos 30 dias
@@ -535,12 +669,86 @@ comment on view vw_auditoria_movimentacoes is
   'Histórico completo de movimentações com produto, local e usuário responsável. A coluna busca concatena produto, apresentação e usuário sem acento, para o filtro de texto da tela.';
 
 -- -------------------------------------------------------------
+-- 14.1 VIEW — requisições (cabeçalho)
+--      O que o modal de "requisição existente" lê. A contagem de itens
+--      respeita o RLS (security_invoker), então o gerente da Cozinha vê
+--      "2 itens" numa requisição de 5 se 3 são de outro local — coerente
+--      com o resto da tela, que também só mostra o que ele pode ver.
+-- -------------------------------------------------------------
+create or replace view vw_requisicoes as
+select
+  r.id,
+  r.criado_em,
+  r.atualizado_em,
+  r.digitado_por,
+  pd.nome as digitado_por_nome,
+  r.entregue_por,
+  pe.nome as entregue_por_nome,
+  (select count(*)
+     from requisicao_itens i
+    where i.requisicao_id = r.id)                        as itens,
+  (select coalesce(sum(i.quantidade_solicitada), 0)
+     from requisicao_itens i
+    where i.requisicao_id = r.id)                        as total_solicitado
+from requisicoes r
+left join perfis pd on pd.id = r.digitado_por
+left join perfis pe on pe.id = r.entregue_por
+order by r.atualizado_em desc;
+
+alter view vw_requisicoes set (security_invoker = on);
+
+comment on view vw_requisicoes is
+  'Cabeçalho das requisições com nomes dos responsáveis e contagem de itens visíveis ao usuário. Ordenada por última alteração, para o modal de requisição existente.';
+
+-- -------------------------------------------------------------
+-- 14.2 VIEW — itens de requisição
+--      quantidade_entregue é SOMA das movimentações do item, não coluna.
+--      estoques.quantidade_atual já ensinou o preço de manter cache à mão
+--      (foi de lá que veio o bug do saldo que nunca atualizava), e hoje o
+--      admin pode excluir movimentação: cada exclusão exigiria outro
+--      trigger para corrigir o número, e um esquecimento o deixaria
+--      mentindo para sempre. Derivada, ela se corrige sozinha.
+-- -------------------------------------------------------------
+create or replace view vw_requisicao_itens as
+select
+  i.id,
+  i.requisicao_id,
+  i.apresentacao_id,
+  i.local_id,
+  i.quantidade_solicitada,
+  coalesce((select sum(m.quantidade)
+              from movimentacoes m
+             where m.requisicao_item_id = i.id), 0)       as quantidade_entregue,
+  p.id        as produto_id,
+  p.nome      as produto,
+  a.descricao as apresentacao,
+  a.quantidade_unitaria,
+  u.sigla     as unidade,
+  l.nome      as local,
+  i.criado_em
+from requisicao_itens i
+join apresentacoes a on a.id = i.apresentacao_id
+join produtos      p on p.id = a.produto_id
+join unidades      u on u.id = a.unidade_id
+join locais        l on l.id = i.local_id
+order by i.criado_em desc;
+
+alter view vw_requisicao_itens set (security_invoker = on);
+
+comment on view vw_requisicao_itens is
+  'Itens de requisição com produto, local, solicitada e entregue. A entregue é a soma das movimentações vinculadas ao item.';
+
+-- -------------------------------------------------------------
 -- 15. ÍNDICES — performance em consultas comuns
 -- -------------------------------------------------------------
 create index idx_movimentacoes_estoque_data on movimentacoes(estoque_id, data desc);
 create index idx_movimentacoes_tipo_data    on movimentacoes(tipo, data desc);
 create index idx_movimentacoes_criado_por   on movimentacoes(criado_por);
 create index idx_movimentacoes_motivo_id    on movimentacoes(motivo_id);
+-- Parcial: a grande maioria das movimentações não tem requisição, e o índice
+-- só serve para somar a quantidade entregue de um item.
+create index idx_movimentacoes_requisicao_item on movimentacoes(requisicao_item_id)
+  where requisicao_item_id is not null;
 create index idx_estoques_apresentacao      on estoques(apresentacao_id);
 create index idx_estoques_local             on estoques(local_id);
 create index idx_apresentacoes_produto      on apresentacoes(produto_id);
@@ -635,6 +843,8 @@ alter table locais               enable row level security;
 alter table estoques             enable row level security;
 alter table movimentacoes        enable row level security;
 alter table usuarios_locais      enable row level security;
+alter table requisicoes          enable row level security;
+alter table requisicao_itens     enable row level security;
 
 -- GRANT explícito: as demais tabelas herdaram os privilégios padrão do Supabase
 -- na criação do projeto, mas uma tabela criada depois, por migração, não herda
@@ -643,6 +853,16 @@ alter table usuarios_locais      enable row level security;
 -- limitam quais linhas cada usuário enxerga.
 grant select, insert, update, delete
   on public.usuarios_locais to authenticated;
+
+grant select, insert, update, delete
+  on public.requisicoes, public.requisicao_itens to authenticated;
+
+-- A sequence tem privilégio próprio, separado do da tabela. Sem isto a
+-- leitura funciona e só o primeiro insert falha, com
+-- "permission denied for sequence".
+grant usage, select
+  on sequence public.requisicoes_id_seq, public.requisicao_itens_id_seq
+  to authenticated;
 
 -- === LEITURA — todos autenticados ===
 create policy "autenticados podem ler papeis"
@@ -818,6 +1038,56 @@ create policy "admin pode atualizar locais"
 
 create policy "admin pode deletar locais"
   on locais for delete to authenticated
+  using (fn_is_admin());
+
+-- === REQUISIÇÕES ===
+-- O cabeçalho é legível por qualquer usuário ativo, e é isso que torna a
+-- requisição cruzando locais possível: o gerente da Cozinha precisa achar, no
+-- modal, a requisição que o gerente do Almoxarifado começou. O que fica
+-- exposto é número, data e os dois nomes — produto e quantidade moram nos
+-- itens, que são filtrados por local.
+create policy "autenticados leem requisicoes"
+  on requisicoes for select to authenticated
+  using (fn_is_ativo());
+
+-- Mesma régua de produtos e apresentacoes: o cabeçalho não tem local, então
+-- basta gerenciar algum. Não-admin só pode se pôr como responsável — mesmo
+-- desenho do criado_por em movimentacoes.
+create policy "gestores podem inserir requisicoes"
+  on requisicoes for insert to authenticated
+  with check (
+    fn_pode_editar_algum_local()
+    and (
+      fn_is_admin()
+      or (digitado_por = auth.uid() and entregue_por = auth.uid())
+    )
+  );
+
+create policy "admin pode atualizar requisicoes"
+  on requisicoes for update to authenticated
+  using (fn_is_admin());
+
+create policy "admin pode deletar requisicoes"
+  on requisicoes for delete to authenticated
+  using (fn_is_admin());
+
+-- Nos itens o recorte é por local, pela mesma cadeia de estoques e
+-- movimentacoes. O gerente da Cozinha vê os itens dela e não vê os do
+-- Almoxarifado, mesmo estando na mesma requisição.
+create policy "usuario le itens de requisicao dos locais permitidos"
+  on requisicao_itens for select to authenticated
+  using (fn_pode_ver_local(local_id));
+
+create policy "gestores podem inserir itens de requisicao"
+  on requisicao_itens for insert to authenticated
+  with check (fn_pode_editar_local(local_id));
+
+create policy "admin pode atualizar itens de requisicao"
+  on requisicao_itens for update to authenticated
+  using (fn_is_admin());
+
+create policy "admin pode deletar itens de requisicao"
+  on requisicao_itens for delete to authenticated
   using (fn_is_admin());
 
 -- -------------------------------------------------------------
@@ -1075,6 +1345,120 @@ $$;
 
 comment on function fn_adiciona_apresentacoes_produto(int, jsonb) is
   'Adiciona apresentações (novas ou já existentes) e seus estoques a um produto que já existe, em transação única. Usada pela busca-antes-de-criar da tela de cadastro de produto.';
+
+-- -------------------------------------------------------------
+-- 18.4 FUNÇÃO RPC — saída vinculada a requisição
+--      Grava tudo em UMA transação: cria o cabeçalho se for a primeira
+--      saída, cria ou reaproveita o item, e lança a movimentação. Se
+--      qualquer etapa falhar, nada é gravado — mesmo desenho de
+--      fn_cria_produto_completo.
+--
+--      A requisição nasce aqui, na primeira saída, e não ao abrir a tela:
+--      criar na entrada da tela deixaria uma requisição vazia cada vez que
+--      alguém abre Movimentações só para conferir um saldo, e furos na
+--      numeração.
+--
+--      SECURITY INVOKER: o RLS do usuário logado vale em cada insert.
+-- -------------------------------------------------------------
+create or replace function fn_registra_saida_requisicao(
+  p_estoque_id            int,
+  p_quantidade            numeric,
+  p_quantidade_solicitada numeric     default null,
+  p_motivo_id             int         default null,
+  p_data                  timestamptz default null,
+  p_requisicao_id         int         default null,
+  p_digitado_por          uuid        default null,
+  p_entregue_por          uuid        default null
+)
+returns jsonb
+language plpgsql
+security invoker
+as $$
+declare
+  v_local_id   int;
+  v_ap_id      int;
+  v_req_id     int := p_requisicao_id;
+  v_item_id    int;
+  v_solicitada numeric;
+  v_mov_id     int;
+  v_digitado   uuid;
+  v_entregue   uuid;
+  v_item_novo  boolean := false;
+begin
+  -- O select passa pelo RLS: estoque de local sem permissão não aparece, e o
+  -- erro sai aqui com mensagem própria em vez de estourar no insert.
+  select e.local_id, e.apresentacao_id
+    into v_local_id, v_ap_id
+    from estoques e
+   where e.id = p_estoque_id;
+
+  if v_local_id is null then
+    raise exception 'Estoque não encontrado ou sem permissão neste local.'
+      using errcode = '42501';
+  end if;
+
+  if v_req_id is not null then
+    perform 1 from requisicoes where id = v_req_id;
+    if not found then
+      raise exception 'Requisição % não encontrada.', v_req_id
+        using errcode = '23503';
+    end if;
+  else
+    -- Só admin indica outra pessoa; para os demais o responsável é quem
+    -- opera. A policy exige o mesmo, então não dá para contornar pela API.
+    if fn_is_admin() then
+      v_digitado := coalesce(p_digitado_por, auth.uid());
+      v_entregue := coalesce(p_entregue_por, auth.uid());
+    else
+      v_digitado := auth.uid();
+      v_entregue := auth.uid();
+    end if;
+
+    insert into requisicoes (digitado_por, entregue_por)
+    values (v_digitado, v_entregue)
+    returning id into v_req_id;
+  end if;
+
+  -- Mesmo produto e mesmo local na mesma requisição reaproveitam o item: a
+  -- segunda retirada é outra movimentação dele, e a quantidade entregue, que
+  -- é soma, acumula sozinha. A solicitada continua a da primeira vez — pedir
+  -- duas vezes o mesmo item não teria sentido.
+  select id, quantidade_solicitada
+    into v_item_id, v_solicitada
+    from requisicao_itens
+   where requisicao_id   = v_req_id
+     and apresentacao_id = v_ap_id
+     and local_id        = v_local_id;
+
+  if v_item_id is null then
+    insert into requisicao_itens
+      (requisicao_id, apresentacao_id, local_id, quantidade_solicitada)
+    values
+      (v_req_id, v_ap_id, v_local_id,
+       coalesce(nullif(p_quantidade_solicitada, 0), p_quantidade))
+    returning id, quantidade_solicitada into v_item_id, v_solicitada;
+    v_item_novo := true;
+  end if;
+
+  insert into movimentacoes
+    (estoque_id, criado_por, tipo, quantidade, motivo_id, data, requisicao_item_id)
+  values
+    (p_estoque_id, auth.uid(), 'saida', p_quantidade, p_motivo_id,
+     coalesce(p_data, now()), v_item_id)
+  returning id into v_mov_id;
+
+  return jsonb_build_object(
+    'requisicao_id',         v_req_id,
+    'requisicao_item_id',    v_item_id,
+    'movimentacao_id',       v_mov_id,
+    'quantidade_solicitada', v_solicitada,
+    'item_novo',             v_item_novo
+  );
+end;
+$$;
+
+comment on function fn_registra_saida_requisicao(int, numeric, numeric, int, timestamptz, int, uuid, uuid) is
+  'Registra uma saída vinculada a requisição em transação única: cria o cabeçalho na primeira saída, cria ou reaproveita o item e grava a movimentação. Usada pela tela de Movimentações.';
 
 -- -------------------------------------------------------------
 -- 19. DADOS DE REFERÊNCIA

@@ -1,14 +1,26 @@
 # Migrações
 
-Pasta vazia de propósito. As migrações 01 a 07 foram aplicadas nos três bancos —
-testes e as duas instâncias de produção — e o conteúdo delas já está consolidado no
-**`estoque_schema_normalizado.sql`**, na raiz do projeto.
+As migrações 01 a 07 foram aplicadas nos três bancos — testes e as duas instâncias de
+produção — e o conteúdo delas já está consolidado no
+**`estoque_schema_normalizado.sql`**, na raiz do projeto. Por isso foram removidas da
+árvore de trabalho (veja como recuperá-las abaixo).
+
+## Pendente
+
+| Migração | Testes | Produção A | Produção B |
+|---|---|---|---|
+| `08_requisicoes.md` | — | — | — |
+
+Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os três estiverem
+em dia.
 
 ## Como criar um banco novo
 
 Rode só o `estoque_schema_normalizado.sql` no SQL Editor do Supabase. Ele representa o
-estado final do schema, com tudo que as migrações faziam. Não há migração avulsa para
-aplicar depois.
+estado final do schema, com tudo que as migrações faziam — **inclusive as pendentes
+acima**, que são sincronizadas nele no mesmo commit. Não há migração avulsa para aplicar
+depois num banco criado do zero; a lista de pendências serve só para os bancos que já
+existem.
 
 Para popular com dados fictícios e conferir as telas, rode o `seed_demo.sql` em
 seguida — nunca em produção.

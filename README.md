@@ -14,8 +14,9 @@ No SQL Editor do Supabase, rode:
    **Só em banco de testes.**
 
 O schema já inclui todas as migrações, então é só esse arquivo — não há migração avulsa
-para aplicar depois. A pasta `migracoes/` está vazia por isso; o README dela explica
-como recuperar uma migração antiga do histórico do git, se precisar.
+para aplicar depois num banco novo. A pasta `migracoes/` guarda apenas o que ainda falta
+rodar nos bancos **já existentes**; o README dela controla isso e explica como recuperar
+uma migração antiga do histórico do git, se precisar.
 
 Login inicial: `admin@estoque.com` / `estoque`. Troque a senha depois do primeiro acesso.
 
