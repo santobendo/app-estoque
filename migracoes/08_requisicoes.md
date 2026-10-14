@@ -426,10 +426,20 @@ alter view vw_requisicao_itens set (security_invoker = on);
 comment on view vw_requisicao_itens is
   'Itens de requisição com produto, local, solicitada e entregue. A entregue é a soma das movimentações vinculadas ao item.';
 
+-- View também tem privilégio próprio, igual à sequence: sem este grant a
+-- leitura falha com "42501: permission denied for view vw_requisicao_itens",
+-- antes de qualquer policy ser avaliada. O security_invoker acima cuida de
+-- QUAIS linhas aparecem; o grant cuida de poder abrir a view.
+grant select on public.vw_requisicoes, public.vw_requisicao_itens to authenticated;
+
 notify pgrst, 'reload schema';
 
 commit;
 ```
+
+> **Se você rodou a Parte 4 antes de 14/10/2026**, ela não tinha o `grant select` nas
+> views e o teste 3 falha com `42501: permission denied for view vw_requisicao_itens`.
+> Rode só a linha do grant e o `notify`; o resto da parte já está aplicado.
 
 ---
 
@@ -460,11 +470,15 @@ select
   (select count(*) from pg_views
     where schemaname = 'public'
       and viewname in ('vw_requisicoes', 'vw_requisicao_itens'))          as views,
+  (select count(*) from information_schema.role_table_grants
+    where table_schema = 'public' and grantee = 'authenticated'
+      and table_name in ('vw_requisicoes', 'vw_requisicao_itens'))        as grants_views,
   (select count(*) from pg_trigger
     where tgname in ('tg_toca_requisicao_item', 'tg_toca_requisicao_entrega')) as triggers;
 ```
 
-Esperado: `2 | 1 | 8 | 8 | 2 | 2`. Os grants contam 4 privilégios × 2 tabelas.
+Esperado: `2 | 1 | 8 | 8 | 2 | 2 | 2`. Os grants de tabela contam 4 privilégios × 2
+tabelas; os de view, `select` × 2 views.
 
 ### 2. Gravar uma saída com requisição nova
 

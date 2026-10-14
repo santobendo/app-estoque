@@ -864,6 +864,21 @@ grant usage, select
   on sequence public.requisicoes_id_seq, public.requisicao_itens_id_seq
   to authenticated;
 
+-- A view também tem privilégio próprio. Sem isto a leitura falha com
+-- "42501: permission denied for view ...", antes de qualquer policy ser
+-- avaliada: o security_invoker decide QUAIS linhas aparecem, o grant decide
+-- se dá para abrir a view. As três primeiras vinham funcionando pelo
+-- privilégio padrão do Supabase, mas as duas de requisição, criadas por
+-- migração, não herdaram nada — então aqui é explícito para todas, para não
+-- depender de um padrão que já se mostrou irregular.
+grant select on
+  public.vw_consumo_30_dias,
+  public.vw_sugestao_compra,
+  public.vw_auditoria_movimentacoes,
+  public.vw_requisicoes,
+  public.vw_requisicao_itens
+  to authenticated;
+
 -- === LEITURA — todos autenticados ===
 create policy "autenticados podem ler papeis"
   on papeis for select to authenticated using (true);
