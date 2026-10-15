@@ -6,6 +6,7 @@ import { Search, ArrowDownCircle, ArrowUpCircle, ChevronLeft, ChevronRight, Tras
 import { ConfirmDialog, traduzErro } from '../components/TabelaCrud';
 import { useToast } from '../lib/toast';
 import { normalizar } from '../lib/texto';
+import { inicioDoDiaISO, fimDoDiaISO } from '../lib/datas';
 
 const PAGE_SIZE = 20;
 
@@ -108,8 +109,8 @@ export default function Historico() {
        SEM_MOTIVO não haveria como isolar justamente essas linhas. */
     if (filtroMotivo === SEM_MOTIVO) query = query.is('motivo', null);
     else if (filtroMotivo)           query = query.eq('motivo', filtroMotivo);
-    if (filtroInicio) query = query.gte('data', new Date(filtroInicio).toISOString());
-    if (filtroFim)    query = query.lte('data', new Date(filtroFim + 'T23:59:59').toISOString());
+    if (filtroInicio) query = query.gte('data', inicioDoDiaISO(filtroInicio));
+    if (filtroFim)    query = query.lte('data', fimDoDiaISO(filtroFim));
     /* O filtro bate na coluna "busca" da view, que já vem sem acento e em
        maiúsculas (produto + apresentação + usuário). Por isso o termo também
        é normalizado antes de sair daqui: as duas pontas têm que combinar.

@@ -13,6 +13,7 @@ import { Label, SectionHeader } from '../components/Secao';
 import SecaoRequisicao from '../components/SecaoRequisicao';
 import { useToast } from '../lib/toast';
 import { normalizar } from '../lib/texto';
+import { agoraParaInput } from '../lib/datas';
 
 /* ─── helpers ─── */
 function Spinner() {
@@ -247,7 +248,7 @@ export default function Movimentacoes() {
   const [motivoId, setMotivoId]         = useState('');
   const [quantidade, setQuantidade]     = useState('');
   const [quantidadeContada, setQuantidadeContada] = useState('');
-  const [data, setData]                 = useState(() => new Date().toISOString().slice(0, 16));
+  const [data, setData]                 = useState(agoraParaInput);
 
   /* ── requisição ──
      opcao: 'nova' | 'existente' | 'sem'. O padrão é 'sem' para a tela abrir
@@ -603,7 +604,7 @@ export default function Movimentacoes() {
     setQuantidade('');
     setQuantidadeContada('');
     setQtdSolicitada('');
-    setData(new Date().toISOString().slice(0, 16));
+    setData(agoraParaInput());
     setErros({});
     /* A requisição ativa sobrevive ao reset, igual a modo e tipo: a próxima
        saída é da mesma requisição até o usuário dizer o contrário. */

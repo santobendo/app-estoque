@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useLocal } from '../contexts/LocalContext';
 import { Search, Download, Printer, Package } from 'lucide-react';
 import { normalizar, algumContem } from '../lib/texto';
+import { hojeParaInput } from '../lib/datas';
 
 function formatarDataHora(d) {
   return d.toLocaleString('pt-BR', {
@@ -86,7 +87,7 @@ export default function RelatorioEstoque() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     const nomeLocal = (localAtual?.nome || 'estoque').replace(/[^\w-]+/g, '_');
-    const data = new Date().toISOString().slice(0, 10);
+    const data = hojeParaInput();
     a.href = url;
     a.download = `relatorio_estoque_${nomeLocal}_${data}.csv`;
     a.click();
