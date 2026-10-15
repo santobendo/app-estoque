@@ -445,6 +445,13 @@ commit;
 
 ## Testes
 
+> **Rode os testes apenas no banco de testes.** Eles ficam em `begin/rollback`
+> e nenhuma linha sobra, mas **sequence não volta atrás**: `nextval` não é
+> transacional de propósito, senão duas transações concorrentes teriam que
+> esperar uma à outra para pegar um número. Resultado: cada teste queima um id,
+> e no banco de testes a primeira requisição de verdade nasceu como **#11**.
+> Em produção, rodando só as Partes 1 a 4, a primeira requisição é a **#1**.
+
 Pegue seu uuid primeiro — ele entra nos blocos seguintes:
 
 ```sql
@@ -482,8 +489,9 @@ tabelas; os de view, `select` × 2 views.
 
 ### 2. Gravar uma saída com requisição nova
 
-Troque `SEU_UUID`. Roda em `begin/rollback`, então **não grava nada** — é só
-para ver o mecanismo funcionando com o RLS de um usuário de verdade.
+Troque `SEU_UUID`. Roda em `begin/rollback`, então **não grava nenhuma
+linha** — é só para ver o mecanismo funcionando com o RLS de um usuário de
+verdade. O número da requisição, esse sim, é consumido (veja o aviso acima).
 
 ```sql
 begin;
