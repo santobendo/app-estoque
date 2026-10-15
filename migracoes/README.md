@@ -1,15 +1,18 @@
 # Migrações
 
-As migrações 01 a 07 foram aplicadas nos três bancos — testes e as duas instâncias de
+**A pasta está vazia: não há migração pendente.**
+
+As migrações 01 a 08 foram aplicadas nos três bancos — testes e as duas instâncias de
 produção — e o conteúdo delas já está consolidado no
 **`estoque_schema_normalizado.sql`**, na raiz do projeto. Por isso foram removidas da
 árvore de trabalho (veja como recuperá-las abaixo).
 
-## Pendente
+Quando aparecer migração nova, ela entra aqui e volta uma tabela como esta, para
+controlar o que já rodou em cada banco:
 
 | Migração | Testes | Produção A | Produção B |
 |---|---|---|---|
-| `08_requisicoes.md` | — | — | — |
+| `NN_descricao.md` | — | — | — |
 
 Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os três estiverem
 em dia.
@@ -17,18 +20,20 @@ em dia.
 ## Como criar um banco novo
 
 Rode só o `estoque_schema_normalizado.sql` no SQL Editor do Supabase. Ele representa o
-estado final do schema, com tudo que as migrações faziam — **inclusive as pendentes
-acima**, que são sincronizadas nele no mesmo commit. Não há migração avulsa para aplicar
-depois num banco criado do zero; a lista de pendências serve só para os bancos que já
-existem.
+estado final do schema, com tudo que as migrações faziam — **inclusive as que ainda
+estiverem pendentes acima**, porque são sincronizadas nele no mesmo commit. Não há
+migração avulsa para aplicar depois num banco criado do zero; a lista de pendências
+serve só para os bancos que já existem.
 
 Para popular com dados fictícios e conferir as telas, rode o `seed_demo.sql` em
 seguida — nunca em produção.
 
 ## Como recuperar uma migração antiga
 
-Nada foi perdido, só saiu da árvore de trabalho. O último commit em que os arquivos
-existiram é o pai de `chore: remove as migracoes ja aplicadas`:
+Nada foi perdido, só saiu da árvore de trabalho. Cada arquivo viveu até o commit que o
+removeu — `chore: remove as migracoes ja aplicadas` para as migrações 01 a 07, e o
+commit que tirou a 08 depois que ela rodou nos três bancos. O conteúdo está no pai
+desses commits:
 
 ```bash
 # listar o que havia na pasta
@@ -59,6 +64,12 @@ valer o `git show` quando chegar a hora:
   teste que prova o `security_invoker` das views.
 - **Teste do saldo negativo** (seção 3.4 da migração 06): lança entrada, consome, e
   tenta excluir a entrada — o resultado esperado é erro, não sucesso.
+- **Testes da requisição** (migração 08): cinco blocos que exercitam o
+  `fn_registra_saida_requisicao` com o RLS de um usuário de verdade — criação tardia do
+  cabeçalho, reuso do item na segunda saída do mesmo produto, requisição cruzando
+  locais, e o item que sobrevive com entregue = 0 quando a movimentação é excluída.
+  Atenção: eles rodam em `begin/rollback` e não deixam linha, mas queimam ids da
+  sequence — só em banco de testes.
 
 ## Convenção, daqui pra frente
 

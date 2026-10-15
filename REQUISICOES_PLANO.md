@@ -241,13 +241,13 @@ somar a entrega, e o 4 a requisição cruzando locais.
 
 | | |
 |---|---|
-| 1. Migração 08 | escrita — **falta você rodar no banco de testes** |
+| 1. Migração 08 | aplicada nos três bancos em 15/10/2026 — arquivo removido de `migracoes/`, conteúdo no schema |
 | 2. `SecaoRequisicao.jsx` com as três opções | feito |
 | 3. Modal de requisição existente | feito |
 | 4. RPC e gravação | feito |
 | 5. Lista de itens da requisição ativa | feito |
 | 6. Responsáveis para admin | feito |
-| 7. Teste do fluxo cruzando locais | teste 4 da migração; falta o teste pela tela |
+| 7. Teste do fluxo cruzando locais | teste 4 da migração e teste pela tela — ok |
 
 ---
 
