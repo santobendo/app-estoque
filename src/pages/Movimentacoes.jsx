@@ -8,6 +8,7 @@ import {
   CornerDownLeft,
 } from 'lucide-react';
 import { traduzErro } from '../lib/erros';
+import { useCarregamento } from '../lib/useCarregamento';
 import Kbd from '../components/Kbd';
 import { Label, SectionHeader } from '../components/Secao';
 import SecaoRequisicao from '../components/SecaoRequisicao';
@@ -247,19 +248,17 @@ export default function Movimentacoes() {
   const buscaRef = useRef(null);
   useEffect(() => { buscaRef.current?.focus(); }, []);
 
-  /* ── dados mestres ── */
-  const [motivos, setMotivos]       = useState([]);
-  const [apresentacoes, setApresentacoes] = useState([]);
-  const [estoques, setEstoques]     = useState([]); // estoques da apresentação selecionada
-
-  /* ── seleções ── */
+  /* ── seleções ──
+     Os três campos de lista (apresentação, motivo, estoque) guardam a escolha
+     do usuário, e o valor que a tela usa é derivado mais abaixo: a escolha
+     vale enquanto existir na lista atual. É o que evita o select mostrar uma
+     opção e o estado guardar outra — ver o comentário em motivoId. */
   const [modo, setModo]                 = useState('movimento'); // 'movimento' | 'ajuste'
   const [produto, setProduto]           = useState(null);
   const [buscaProduto, setBuscaProduto] = useState('');
-  const [apresentacaoId, setApresentacaoId] = useState('');
-  const [estoqueId, setEstoqueId]       = useState('');
+  const [apresentacaoEscolhida, setApresentacaoEscolhida] = useState('');
   const [tipo, setTipo]                 = useState('saida');
-  const [motivoId, setMotivoId]         = useState('');
+  const [motivoEscolhido, setMotivoEscolhido] = useState('');
   const [quantidade, setQuantidade]     = useState('');
   const [quantidadeContada, setQuantidadeContada] = useState('');
   const [data, setData]                 = useState(agoraParaInput);
@@ -277,10 +276,8 @@ export default function Movimentacoes() {
     }
   });
   const [requisicao, setRequisicao]       = useState(null);
-  const [itensReq, setItensReq]           = useState([]);
   const [versaoItens, setVersaoItens]     = useState(0);
   const [qtdSolicitada, setQtdSolicitada] = useState('');
-  const [usuarios, setUsuarios]           = useState([]);
   const [digitadoPor, setDigitadoPor]     = useState('');
   const [entreguePor, setEntreguePor]     = useState('');
 
@@ -293,7 +290,6 @@ export default function Movimentacoes() {
   /* ── estado ── */
   const [loading, setLoading]   = useState(false);
   const [erros, setErros]       = useState({});
-  const [estoqueAtual, setEstoqueAtual] = useState(null);
 
   /* Por ora o fluxo de requisição é só de administrador, como combinado. O
      banco já aceita gerente de local (as policies filtram os itens por
@@ -305,11 +301,13 @@ export default function Movimentacoes() {
   /* ─ Lista de usuários para os selects de responsável (só admin escolhe outra
        pessoa; a policy do cabeçalho exige o mesmo, então não dá para burlar
        pela API) ─ */
-  useEffect(() => {
-    if (!isAdmin) return;
-    supabase.from('perfis').select('id, nome').eq('ativo', true).order('nome')
-      .then(({ data }) => { if (data) setUsuarios(data); });
-  }, [isAdmin]);
+  const { dados: usuarios } = useCarregamento(async () => {
+    if (!isAdmin) return [];
+    const { data, error } = await supabase
+      .from('perfis').select('id, nome').eq('ativo', true).order('nome');
+    if (error) throw error;
+    return data ?? [];
+  }, [isAdmin], []);
 
   /* ─ Restaura a requisição ativa depois de um F5 ─
      Se ela não voltar (foi excluída, ou o usuário perdeu acesso), a sessão é
@@ -344,73 +342,63 @@ export default function Movimentacoes() {
   /* ─ Itens já lançados na requisição ativa ─
      Depende do id e de versaoItens: o contador é incrementado depois de cada
      gravação, que é o que faz a lista e o total de entregue se atualizarem. */
-  useEffect(() => {
-    if (!requisicao?.id) return;
-    let vivo = true;
+  const { dados: itensReq } = useCarregamento(async () => {
+    if (!requisicao?.id) return [];
     /* Ordem explícita, não a da view: o primeiro da lista é o último
        lançamento, e é ele que a seção mostra recolhida. */
-    supabase.from('vw_requisicao_itens').select('*')
+    const { data, error } = await supabase.from('vw_requisicao_itens').select('*')
       .eq('requisicao_id', requisicao.id)
-      .order('criado_em', { ascending: false })
-      .then(({ data }) => { if (vivo) setItensReq(data ?? []); });
-    return () => { vivo = false; };
-  }, [requisicao?.id, versaoItens]);
+      .order('criado_em', { ascending: false });
+    if (error) throw error;
+    return data ?? [];
+  }, [requisicao?.id, versaoItens], []);
 
-  /* ─ Carrega motivos ─
-     Não define motivoId aqui: o motivo padrão depende do tipo e da lista
-     filtrada — isso é resolvido no efeito abaixo, senão o valor pode
-     apontar para um motivo que não está entre as opções visíveis. */
-  useEffect(() => {
-    supabase.from('motivos_movimentacao').select('id, codigo, descricao').order('descricao')
-      .then(({ data }) => {
-        if (data) setMotivos(data);
-      });
-  }, []);
+  /* ─ Carrega motivos ─ */
+  const { dados: motivos } = useCarregamento(async () => {
+    const { data, error } = await supabase
+      .from('motivos_movimentacao').select('id, codigo, descricao').order('descricao');
+    if (error) throw error;
+    return data ?? [];
+  }, [], []);
 
   /* ─ Carrega apresentações quando produto muda ─ */
-  useEffect(() => {
-    setApresentacaoId('');
-    setEstoques([]);
-    setEstoqueId('');
-    setEstoqueAtual(null);
-    if (!produto) { setApresentacoes([]); return; }
-
-    supabase
+  const { dados: apresentacoes } = useCarregamento(async () => {
+    if (!produto) return [];
+    const { data, error } = await supabase
       .from('apresentacoes')
       .select('id, descricao, quantidade_unitaria, unidades(sigla)')
       .eq('produto_id', produto.id)
-      .order('descricao')
-      .then(({ data }) => {
-        setApresentacoes(data ?? []);
-        if (data?.length) setApresentacaoId(String(data[0].id));
-      });
-  }, [produto]);
+      .order('descricao');
+    if (error) throw error;
+    return data ?? [];
+  }, [produto?.id], []);
+
+  /* A escolha do usuário vale enquanto existir na lista; trocar de produto
+     troca a lista e o valor cai sozinho na primeira apresentação. Antes isso
+     era um setApresentacaoId('') no topo do efeito de carga — o setState
+     síncrono dentro de efeito que o lint acusava, e que ainda deixava a tela
+     por um render com id de uma apresentação de outro produto. */
+  const apresentacaoId = apresentacoes.some(a => String(a.id) === apresentacaoEscolhida)
+    ? apresentacaoEscolhida
+    : (apresentacoes[0] ? String(apresentacoes[0].id) : '');
 
   /* ─ Carrega o estoque da apresentação no local selecionado na barra ─ */
-  useEffect(() => {
-    setEstoqueId('');
-    setEstoqueAtual(null);
-    if (!apresentacaoId || !localAtual) { setEstoques([]); return; }
-
-    supabase
+  const { dados: estoques } = useCarregamento(async () => {
+    if (!apresentacaoId || !localAtual) return [];
+    const { data, error } = await supabase
       .from('estoques')
       .select('id, quantidade_atual, locais(id, nome)')
       .eq('apresentacao_id', Number(apresentacaoId))
-      .eq('local_id', localAtual.id)
-      .then(({ data }) => {
-        setEstoques(data ?? []);
-        if (data?.length) {
-          setEstoqueId(String(data[0].id));
-          setEstoqueAtual(Number(data[0].quantidade_atual));
-        }
-      });
-  }, [apresentacaoId, localAtual]);
+      .eq('local_id', localAtual.id);
+    if (error) throw error;
+    return data ?? [];
+  }, [apresentacaoId, localAtual?.id], []);
 
-  /* ─ Atualiza estoque atual quando local muda ─ */
-  useEffect(() => {
-    const est = estoques.find(e => String(e.id) === estoqueId);
-    setEstoqueAtual(est ? Number(est.quantidade_atual) : null);
-  }, [estoqueId, estoques]);
+  /* Uma apresentação tem no máximo um estoque por local — é o unique
+     (apresentacao_id, local_id) da tabela. Por isso aqui não há escolha a
+     fazer nem select na tela: o estoque e o saldo são os da única linha. */
+  const estoqueId    = estoques.length ? String(estoques[0].id) : '';
+  const estoqueAtual = estoques.length ? Number(estoques[0].quantidade_atual) : null;
 
   /* ─ Filtra motivos conforme tipo ─
      'ajuste' não aparece aqui: tem fluxo próprio (modo "Ajuste de contagem"),
@@ -422,16 +410,24 @@ export default function Movimentacoes() {
 
   const motivoAjuste = motivos.find(m => m.codigo === 'ajuste');
 
-  /* Garante que motivoId seja sempre um motivo presente na lista filtrada.
-     Roda quando os motivos carregam ou o tipo muda; só reescreve se o
-     valor atual não estiver entre as opções válidas (evita loop e não
-     atrapalha uma escolha manual do usuário). */
-  useEffect(() => {
-    if (!motivosFiltrados.length) return;
-    if (!motivosFiltrados.some(m => String(m.id) === motivoId)) {
-      setMotivoId(String(motivosFiltrados[0].id));
-    }
-  }, [tipo, motivos]);
+  /* O motivo que vale é a escolha do usuário enquanto ela estiver entre as
+     opções do tipo atual; fora disso, o primeiro da lista.
+
+     Isto era um efeito com setMotivoId dentro, e consertava um bug real:
+     saídas marcadas como "Consumo regular" eram gravadas como ajuste, porque
+     o <select> tinha um valor que não correspondia a nenhum <option> visível
+     — a tela mostrava a primeira opção e o estado guardava o motivo antigo.
+     A lista de dependências daquele efeito era deliberadamente incompleta,
+     para não sobrescrever a escolha manual, e vivia marcada como "não
+     corrigir" na dívida técnica.
+
+     Derivando, o bug não tem como voltar: não existe instante em que o valor
+     exibido e o valor gravado discordem, porque são o mesmo. E a escolha
+     manual continua respeitada — ela só é descartada quando deixa de ser
+     válida para o tipo. */
+  const motivoId = motivosFiltrados.some(m => String(m.id) === motivoEscolhido)
+    ? motivoEscolhido
+    : (motivosFiltrados[0] ? String(motivosFiltrados[0].id) : '');
 
   /* ─ Diferença entre a contagem física e o saldo do sistema (modo ajuste) ─ */
   const diferencaAjuste = quantidadeContada !== '' && estoqueAtual !== null
@@ -613,8 +609,7 @@ export default function Movimentacoes() {
   const resetForm = () => {
     setProduto(null);
     setBuscaProduto('');
-    setApresentacaoId('');
-    setEstoqueId('');
+    setApresentacaoEscolhida('');
     setQuantidade('');
     setQuantidadeContada('');
     setQtdSolicitada('');
@@ -768,7 +763,7 @@ export default function Movimentacoes() {
                 <Label required>Apresentação / Embalagem</Label>
                 <select
                   value={apresentacaoId}
-                  onChange={e => setApresentacaoId(e.target.value)}
+                  onChange={e => setApresentacaoEscolhida(e.target.value)}
                   className={`input-base ${erros.apresentacao ? 'border-rose-400' : ''}`}
                 >
                   {apresentacoes.map(a => (
@@ -922,7 +917,7 @@ export default function Movimentacoes() {
                   <Label required>Motivo</Label>
                   <select
                     value={motivoId}
-                    onChange={e => setMotivoId(e.target.value)}
+                    onChange={e => setMotivoEscolhido(e.target.value)}
                     className="input-base"
                   >
                     {motivosFiltrados.map(m => (

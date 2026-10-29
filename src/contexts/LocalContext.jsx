@@ -1,5 +1,6 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { useCarregamento } from '../lib/useCarregamento';
 import { useAuth } from './auth';
 import { LocalContext } from './local';
 
@@ -9,18 +10,21 @@ const STORAGE_KEY = 'app-estoque:local-atual';
    Persiste no localStorage para sobreviver ao refresh. */
 export function LocalProvider({ children }) {
   const { user, isAdmin } = useAuth();
-  const [locais, setLocais]               = useState([]);
-  const [localAtual, setLocalAtualState]  = useState(null);
-  const [loadingLocal, setLoadingLocal]   = useState(true);
+  /* localAtual continua sendo estado próprio, e não um derivado da carga: a
+     barra superior troca de local sem recarregar nada. Quem carrega escolhe o
+     valor inicial, quem clica substitui — e é por isso que o setLocalAtualState
+     aparece dentro da função de carga. */
+  const [localAtual, setLocalAtualState] = useState(null);
 
-  const refreshLocais = useCallback(async () => {
+  const {
+    dados: locais,
+    carregando: loadingLocal,
+    recarregar: refreshLocais,
+  } = useCarregamento(async () => {
     if (!user) {
-      setLocais([]);
       setLocalAtualState(null);
-      setLoadingLocal(false);
-      return;
+      return [];
     }
-    setLoadingLocal(true);
 
     /* A consulta a "locais" não filtra por permissão: o RLS já devolve só os
        locais concedidos. O que ela não diz é se o acesso é de leitura ou de
@@ -44,17 +48,14 @@ export function LocalProvider({ children }) {
       ...l,
       pode_editar: isAdmin || mapa.get(l.id) === true,
     }));
-    setLocais(lista);
-
     // Restaura a seleção salva; se o local sumiu/foi desativado, cai no primeiro
     const salvo  = Number(localStorage.getItem(STORAGE_KEY));
     const achado = lista.find(l => l.id === salvo) ?? lista[0] ?? null;
     setLocalAtualState(achado);
     if (achado) localStorage.setItem(STORAGE_KEY, String(achado.id));
-    setLoadingLocal(false);
-  }, [user, isAdmin]);
 
-  useEffect(() => { refreshLocais(); }, [refreshLocais]);
+    return lista;
+  }, [user?.id, isAdmin], []);
 
   const setLocalAtual = (id) => {
     const local = locais.find(l => l.id === Number(id)) ?? null;

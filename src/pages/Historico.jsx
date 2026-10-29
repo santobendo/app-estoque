@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useLocal } from '../contexts/local';
 import { useAuth } from '../contexts/auth';
@@ -7,6 +7,7 @@ import { ConfirmDialog } from '../components/TabelaCrud';
 import { traduzErro } from '../lib/erros';
 import { useToast } from '../lib/toast';
 import { normalizar } from '../lib/texto';
+import { useCarregamento } from '../lib/useCarregamento';
 import { inicioDoDiaISO, fimDoDiaISO } from '../lib/datas';
 
 const PAGE_SIZE = 20;
@@ -56,10 +57,6 @@ export default function Historico() {
   const { localAtual, loadingLocal } = useLocal();
   const { isAdmin } = useAuth();
   const toast = useToast();
-  const [rows, setRows]         = useState([]);
-  const [total, setTotal]       = useState(0);
-  const [loading, setLoading]   = useState(true);
-  const [pagina, setPagina]     = useState(0);
   const [confirmacao, setConfirmacao] = useState(null);
 
   /* filtros */
@@ -75,6 +72,21 @@ export default function Historico() {
      o usuário nunca escolhe à mão. */
   const [motivos, setMotivos] = useState([]);
 
+  /* A página volta ao início quando filtro ou local muda. Isso era um efeito
+     com setPagina(0) dentro — o segundo erro de set-state-in-effect do
+     arquivo. Agora a página é derivada: o estado guarda junto a chave dos
+     filtros em que o usuário paginou, e se a chave de agora é outra, a
+     resposta é zero sem ninguém precisar gravar nada.
+
+     Um handler em cada filtro não resolveria: `localAtual` vem do contexto e
+     muda sem passar por handler nenhum desta tela. */
+  const chaveFiltros = [
+    filtroTipo, filtroMotivo, filtroInicio, filtroFim, busca, localAtual?.id,
+  ].join('|');
+  const [paginado, setPaginado] = useState({ chave: null, valor: 0 });
+  const pagina = paginado.chave === chaveFiltros ? paginado.valor : 0;
+  const irParaPagina = (valor) => setPaginado({ chave: chaveFiltros, valor });
+
   useEffect(() => {
     supabase
       .from('motivos_movimentacao')
@@ -83,15 +95,12 @@ export default function Historico() {
       .then(({ data }) => { if (data) setMotivos(data); });
   }, []);
 
-  const fetchHistorico = useCallback(async () => {
-    if (loadingLocal) return;
-    if (!localAtual) {
-      setRows([]);
-      setTotal(0);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+  const {
+    dados,
+    carregando,
+    recarregar: fetchHistorico,
+  } = useCarregamento(async () => {
+    if (!localAtual) return { rows: [], total: 0 };
 
     /* Colunas explícitas em vez de '*': a view tem a coluna "busca", que só
        serve para o filtro abaixo e não precisa vir para o navegador. */
@@ -124,17 +133,13 @@ export default function Historico() {
     if (termo) query = query.ilike('busca', `%${termo}%`);
 
     const { data, count, error } = await query;
-    if (!error) {
-      setRows(data ?? []);
-      setTotal(count ?? 0);
-    }
-    setLoading(false);
-  }, [pagina, filtroTipo, filtroMotivo, filtroInicio, filtroFim, busca, localAtual, loadingLocal]);
+    if (error) throw error;
+    return { rows: data ?? [], total: count ?? 0 };
+  }, [pagina, chaveFiltros], { rows: [], total: 0 });
 
-  useEffect(() => { fetchHistorico(); }, [fetchHistorico]);
-
-  /* resetar página ao mudar filtros ou local */
-  useEffect(() => { setPagina(0); }, [filtroTipo, filtroMotivo, filtroInicio, filtroFim, busca, localAtual]);
+  const { rows, total } = dados;
+  /* Espera o contexto decidir o local antes de dizer que não há movimentação. */
+  const loading = carregando || loadingLocal;
 
   /* A exclusão apaga a linha do histórico; o saldo é devolvido pelo trigger
      tg_reverte_estoque, não por uma segunda chamada daqui — se fosse em duas
@@ -168,7 +173,7 @@ export default function Historico() {
 
         /* Era a única linha da página: volta uma, senão o admin fica olhando
            uma página vazia. Mudar a página já dispara o refetch pelo efeito. */
-        if (rows.length === 1 && pagina > 0) setPagina(p => p - 1);
+        if (rows.length === 1 && pagina > 0) irParaPagina(pagina - 1);
         else fetchHistorico();
       },
     });
@@ -350,14 +355,14 @@ export default function Historico() {
               <button
                 className="btn btn-secondary py-1.5 px-3 text-[12px]"
                 disabled={pagina === 0}
-                onClick={() => setPagina(p => p - 1)}
+                onClick={() => irParaPagina(pagina - 1)}
               >
                 <ChevronLeft size={14} />
               </button>
               <button
                 className="btn btn-secondary py-1.5 px-3 text-[12px]"
                 disabled={pagina >= totalPaginas - 1}
-                onClick={() => setPagina(p => p + 1)}
+                onClick={() => irParaPagina(pagina + 1)}
               >
                 <ChevronRight size={14} />
               </button>

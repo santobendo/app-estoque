@@ -260,5 +260,6 @@ somar a entrega, e o 4 a requisição cruzando locais.
   barato (a coluna já existe), mas não estava no pedido e eu não quis ampliar escopo.
 - **Telas dedicadas de requisição** — criar o pedido antes da entrega, entrega parcial,
   data escolhida à mão (ver a coluna `data` na seção 1), edição da solicitada.
-- **`Label`/`SectionHeader` duplicados** em `CadastroProduto.jsx` e `ProdutoDetalhe.jsx` —
-  agora que existe `components/Secao.jsx`, cabe unificar na faxina de lint.
+- ~~**`Label`/`SectionHeader` duplicados** em `CadastroProduto.jsx` e
+  `ProdutoDetalhe.jsx`~~ — feito em 15/10/2026, junto com a faxina de lint. As duas
+  cópias já tinham divergido do original; ver `DIVIDA_TECNICA.md`.

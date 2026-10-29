@@ -1,20 +1,31 @@
 # Dívida técnica — lint
 
-Registro do que o `npx eslint src` acusa hoje, para limpar de uma vez depois que
-a refatoração de acesso por local terminar.
-
-**Estado em 15/10/2026:** 17 erros e 1 aviso, em 10 arquivos.
-Nenhum quebra o build — `npx vite build` passa limpo.
+**Estado em 15/10/2026: zero.** `npx eslint src` não acusa erro nem aviso, e
+`npx vite build` passa limpo.
 
 ```
 npx eslint src
 ```
 
+O registro do que havia fica abaixo, porque o **como** foi resolvido virou
+convenção do projeto — e porque dois dos itens não eram o que pareciam.
+
 ---
 
-## 1. `react-hooks/set-state-in-effect` — 13 erros
+## O que havia
 
-O grosso da dívida, e um padrão único repetido no projeto todo:
+| Regra | Quantidade | Como foi resolvido |
+|---|---|---|
+| `react-hooks/set-state-in-effect` | 13 erros | hook `useCarregamento`, e derivar no lugar de efeito |
+| `react-refresh/only-export-components` | 3 erros | `lib/erros.js`, `contexts/auth.js`, `contexts/local.js` |
+| `no-unused-vars` | 1 erro | era falso positivo — `argsIgnorePattern` no config |
+| `react-hooks/exhaustive-deps` | 1 aviso | derivado; o efeito deixou de existir |
+
+---
+
+## 1. O hook de carregamento
+
+O idioma copiado em dez telas era este:
 
 ```jsx
 const fetch = useCallback(async () => {
@@ -27,76 +38,76 @@ const fetch = useCallback(async () => {
 useEffect(() => { fetch(); }, [fetch]);
 ```
 
-Onde aparece:
-
-| Arquivo | Linhas |
-|---|---|
-| `src/pages/Movimentacoes.jsx` | 358, 377, 398, 418 |
-| `src/pages/Configuracoes.jsx` | 500, 741 |
-| `src/pages/Historico.jsx` | 133, 136 |
-| `src/pages/CadastroProduto.jsx` | 168 |
-| `src/pages/Compras.jsx` | 26 |
-| `src/pages/ProdutoDetalhe.jsx` | 68 |
-| `src/components/TabelaCrud.jsx` | 66 |
-| `src/contexts/LocalContext.jsx` | 57 |
-
-**Por que não foi corrigido pontualmente:** é o idioma de carregamento de dados de
-toda a base. Consertar um arquivo só cria duas convenções convivendo, o que é pior
-que a dívida. Vale fazer numa passada única.
-
-**Como resolver:** extrair um hook `useCarregamento(fn, deps)` que encapsule
-`loading`/`dados`/`erro` e chamar dele em todas as telas. Some o erro e ainda tira
-a repetição de `loading` e do tratamento de erro, que hoje é copiada tela a tela.
-
----
-
-## 2. `react-refresh/only-export-components` — 3 erros
-
-Arquivos que exportam componente **e** outra coisa, o que atrapalha o hot reload:
-
-| Arquivo | Linha | O que exporta junto |
-|---|---|---|
-| `src/components/TabelaCrud.jsx` | 29 | `ConfirmDialog`, `Spinner`, `traduzErro` |
-| `src/contexts/AuthContext.jsx` | 82 | `useAuth` |
-| `src/contexts/LocalContext.jsx` | 87 | `useLocal` |
-
-**Como resolver:** mover `traduzErro` para `src/lib/`, e os hooks `useAuth`/`useLocal`
-para arquivos próprios (`useAuth.js`, `useLocal.js`). É mecânico, mas mexe em import
-de quase toda tela — melhor num commit isolado.
-
----
-
-## 3. `no-unused-vars` — 1 erro
-
-`src/pages/Cadastros.jsx:37` — `Icon` desestruturado do `map` e nunca usado.
-Correção de uma linha.
-
----
-
-## 4. `react-hooks/exhaustive-deps` — 1 aviso — **NÃO CORRIGIR**
-
-`src/pages/Movimentacoes.jsx:420`
+O `setLoading(true)` roda de forma síncrona durante o efeito, o que força um
+segundo render antes de pintar. Agora:
 
 ```jsx
-useEffect(() => {
-  if (!motivosFiltrados.length) return;
-  if (!motivosFiltrados.some(m => String(m.id) === motivoId)) {
-    setMotivoId(String(motivosFiltrados[0].id));
-  }
-}, [tipo, motivos]);   // motivoId e motivosFiltrados omitidos DE PROPÓSITO
+const { dados, carregando, erro, recarregar } = useCarregamento(
+  async () => {
+    const { data, error } = await supabase.from('x').select();
+    if (error) throw error;
+    return data ?? [];
+  },
+  [localAtual?.id],   // muda, recarrega
+  [],                 // valor antes da primeira resposta
+);
 ```
 
-Este aviso é **intencional** e a lista de dependências está certa como está.
+O `src/lib/useCarregamento.js` explica as duas decisões que não são óbvias: o
+`useEffectEvent` guardando a função de carga, e o `carregando` ser **derivado**
+em vez de estado — é isso que faz o spinner aparecer no mesmo render em que a
+dependência muda, sem nenhum `setState` dentro do efeito.
 
-Incluir `motivoId` faria o efeito rodar a cada escolha do usuário; incluir
-`motivosFiltrados` (array recriado a cada render) faria rodar a cada render. Nos dois
-casos o efeito sobrescreveria a escolha manual do usuário.
+**Uma perda a registrar:** a lista de dependências de um hook próprio não é
+checada pelo `exhaustive-deps`. Quem mexer numa carga precisa conferir a lista
+na mão; o lint não avisa mais.
 
-**O bug que isso corrigiu:** saídas marcadas como "Consumo regular" eram gravadas com
-motivo `ajuste`. O `<select>` tinha um valor que não correspondia a nenhum `<option>`
-visível — a tela mostrava a primeira opção, mas o estado guardava o motivo antigo.
-O efeito existe só para reconciliar isso quando o **tipo** muda, e não deve rodar em
-nenhuma outra situação.
+**Duas exceções conscientes**, documentadas no código:
 
-Se for silenciar, use `// eslint-disable-next-line react-hooks/exhaustive-deps` com
-o motivo escrito ao lado — **não** adicione as dependências.
+- `Configuracoes.jsx`, aba Acessos — grava nos próprios estados e mantém o
+  `loading` dela, porque a matriz de acessos é alterada de forma otimista a
+  cada clique e o refetch não deve piscar "Carregando" sobre uma grade cheia.
+- `Movimentacoes.jsx` — a restauração da requisição ativa continua um efeito
+  de verdade: ela sincroniza com o `sessionStorage`, que é sistema externo.
+  Efeito para isso é o uso correto, não dívida.
+
+## 2. Derivar no lugar de efeito
+
+Onde o efeito só reconciliava um valor com uma lista, o valor passou a ser
+derivado. O padrão, repetido em quatro lugares:
+
+```jsx
+const [motivoEscolhido, setMotivoEscolhido] = useState('');
+
+const motivoId = motivosFiltrados.some(m => String(m.id) === motivoEscolhido)
+  ? motivoEscolhido
+  : (motivosFiltrados[0] ? String(motivosFiltrados[0].id) : '');
+```
+
+O estado guarda a **escolha do usuário**; o que a tela usa é o valor válido
+para a lista de agora. Serve para motivo, apresentação, estoque e para a página
+do Histórico.
+
+**O aviso que estava marcado "NÃO CORRIGIR" saiu daqui.** A instrução era não
+adicionar dependências ao efeito do `motivoId`, e ela continua certa: adicionar
+faria o efeito sobrescrever a escolha manual. O que mudou é que o efeito não
+existe mais. O bug que ele consertava — saída marcada como "Consumo regular"
+gravada como ajuste, porque o `<select>` exibia uma opção e o estado guardava
+outra — não tem como voltar, porque agora o valor exibido e o gravado são o
+mesmo. A explicação longa está no comentário em `Movimentacoes.jsx`.
+
+## 3. O falso positivo
+
+`Cadastros.jsx` — `({ icon: Icon })` era acusado de nunca usado, com
+`<Icon size={20} />` três linhas abaixo. Sem o `eslint-plugin-react`, uso só em
+JSX não conta, e o `varsIgnorePattern` que já existia não alcança parâmetro
+desestruturado, que é argumento e não variável. Resolvido com
+`argsIgnorePattern: '^[A-Z_]'` no `eslint.config.js`, em vez de uma dependência
+nova só pelo `jsx-uses-vars`.
+
+## 4. Componentes duplicados
+
+`Label` e `SectionHeader` viviam em quatro arquivos e já tinham divergido: a
+cópia do CadastroProduto não aceitava `subtitle`, a do ProdutoDetalhe não
+aceitava `required`. Agora só em `components/Secao.jsx`. O custo de componente
+duplicado não é a repetição — é a divergência calada.

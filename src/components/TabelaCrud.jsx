@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { traduzErro } from '../lib/erros';
+import { useCarregamento } from '../lib/useCarregamento';
 import { Plus, Pencil, Trash2, Check, X, AlertCircle, UserCheck, UserX } from 'lucide-react';
 
 /* ─── helpers compartilhados ─── */
@@ -33,8 +34,6 @@ export function ConfirmDialog({ mensagem, onConfirm, onCancel }) {
    readOnly:     esconde botões de criação/edição/exclusão
    onDataChange: chamado após qualquer gravação bem-sucedida         */
 export default function TabelaCrud({ tabela, colunas, labelNovo, comAtivo = false, readOnly = false, onDataChange }) {
-  const [rows, setRows]           = useState([]);
-  const [loading, setLoading]     = useState(true);
   const [novo, setNovo]           = useState(null);
   const [editando, setEditando]   = useState(null);
   const [deletando, setDeletando] = useState(null);
@@ -43,16 +42,24 @@ export default function TabelaCrud({ tabela, colunas, labelNovo, comAtivo = fals
 
   const totalColunas = colunas.length + (comAtivo ? 1 : 0) + (readOnly ? 0 : 1);
 
-  const fetch = useCallback(async () => {
-    setLoading(true);
-    const campos = ['id', ...colunas.map(c => c.field), ...(comAtivo ? ['ativo'] : [])].join(', ');
-    const { data, error } = await supabase.from(tabela).select(campos).order(colunas[0].field);
-    if (error) setErro(traduzErro(error));
-    setRows(data ?? []);
-    setLoading(false);
-  }, [tabela]); // eslint-disable-line react-hooks/exhaustive-deps
+  /* O erro da carga vai para o mesmo `erro` das gravações, e não para o que o
+     useCarregamento devolve: a faixa vermelha é uma só e tem botão de fechar,
+     que precisa de um estado que a tela possa limpar.
 
-  useEffect(() => { fetch(); }, [fetch]);
+     Dependência só em `tabela`, como antes: `colunas` e `comAtivo` vêm de
+     literal no JSX do chamador e mudariam de identidade a cada render dele.
+     Vale notar que a lista de dependências de um hook próprio não é checada
+     pelo exhaustive-deps — era por isso que aqui havia um eslint-disable. */
+  const { dados: rows, carregando: loading, recarregar: fetch } = useCarregamento(
+    async () => {
+      const campos = ['id', ...colunas.map(c => c.field), ...(comAtivo ? ['ativo'] : [])].join(', ');
+      const { data, error } = await supabase.from(tabela).select(campos).order(colunas[0].field);
+      if (error) setErro(traduzErro(error));
+      return data ?? [];
+    },
+    [tabela],
+    [],
+  );
 
   const limparVazios = (obj) =>
     Object.fromEntries(Object.entries(obj).map(([k, v]) => [k, v === '' ? null : v]));

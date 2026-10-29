@@ -1,10 +1,12 @@
 import React from 'react';
 
 /* Cabeçalho numerado e rótulo de campo dos formulários em seções.
-   Vivem aqui pelo mesmo motivo do Kbd: a tela de Movimentações e a seção de
-   Requisição usam os dois, e nenhuma das duas é dona deles. CadastroProduto e
-   ProdutoDetalhe ainda têm cópias locais — vale unificar na faxina de lint,
-   não no meio de uma funcionalidade. */
+   Vivem aqui pelo mesmo motivo do Kbd: várias telas usam e nenhuma é dona
+   deles. Eram cópias locais em Movimentações, Requisição, CadastroProduto e
+   ProdutoDetalhe — e já tinham divergido: a cópia do CadastroProduto não
+   aceitava `subtitle` e a do ProdutoDetalhe não aceitava `required`, então
+   quem passasse essas props ali descobriria que não funcionavam. É o custo
+   real de componente duplicado: não é a repetição, é a divergência calada. */
 
 export function Label({ children, required }) {
   return (

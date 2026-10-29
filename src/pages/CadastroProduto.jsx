@@ -8,8 +8,10 @@ import { useNavigate } from 'react-router-dom';
 import { useLocal } from '../contexts/local';
 import { traduzErro } from '../lib/erros';
 import Kbd from '../components/Kbd';
+import { Label, SectionHeader } from '../components/Secao';
 import { useToast } from '../lib/toast';
 import { normalizar } from '../lib/texto';
+import { useCarregamento } from '../lib/useCarregamento';
 
 /* A comparação roda no cliente porque o catálogo inteiro cabe em poucos KB:
    busca instantânea, sem debounce nem ida ao servidor a cada tecla.
@@ -24,15 +26,6 @@ const MAX_SUGESTOES = 50;
 /* ─────────────────────────────────────────────
    Componente de rótulo de campo
 ───────────────────────────────────────────── */
-function Label({ children, required }) {
-  return (
-    <label className="text-[11px] font-bold text-app-text-label uppercase tracking-widest">
-      {children}
-      {required && <span className="text-rose-500 ml-0.5">*</span>}
-    </label>
-  );
-}
-
 /* ─────────────────────────────────────────────
    Tela de sucesso
 ───────────────────────────────────────────── */
@@ -98,10 +91,7 @@ export default function CadastroProduto() {
   const localPadrao = podeEditarAtual ? localAtual : null;
 
   /* ── Dados mestres ── */
-  const [categorias, setCategorias] = useState([]);
-  const [unidades, setUnidades]     = useState([]);
   const [catalogo, setCatalogo]     = useState([]);
-  const [loadingDados, setLoadingDados] = useState(true);
 
   /* ── Busca / identificação do produto ── */
   const [nomeProduto, setNomeProduto] = useState('');
@@ -148,37 +138,33 @@ export default function CadastroProduto() {
   }, []);
 
   /* ────────────────────────────────────────── */
-  useEffect(() => {
-    async function fetchDados() {
-      const [{ data: cats }, { data: units }] =
-        await Promise.all([
-          supabase.from('categorias').select('id, nome').order('nome'),
-          supabase.from('unidades').select('id, sigla, nome').order('sigla'),
-          carregarCatalogo(),
-        ]);
+  /* Espera o contexto resolver o local antes de montar a apresentação inicial.
+     Antes a carga montava a apresentação sem local e um segundo efeito voltava
+     para preencher o local quando o contexto chegasse — era o setState dentro
+     de efeito que o lint acusava. Esperando o loadingLocal, a apresentação já
+     nasce com o local certo e o segundo efeito deixou de existir.
 
-      if (cats)  setCategorias(cats);
-      if (units) {
-        setUnidades(units);
-        setApresentacoes([emptyApresentacao(units)]);
-      }
-      setLoadingDados(false);
-    }
-    fetchDados();
-  }, [carregarCatalogo]);
+     A dependência é só loadingLocal, de propósito: o localPadrao é lido pela
+     função de carga, que o useCarregamento mantém sempre na versão atual. Se
+     ele entrasse nas dependências, trocar de local na barra superior
+     recarregaria tudo e descartaria o formulário já preenchido. */
+  const { dados, carregando } = useCarregamento(async () => {
+    if (loadingLocal) return { categorias: [], unidades: [] };
 
-  /* ── Pré-seleciona o local da barra superior nas apresentações sem local ──
-     Depende de loadingDados porque fetchDados recria a apresentação inicial. */
-  useEffect(() => {
-    if (!localPadrao || loadingDados || produtoSel) return;
-    setApresentacoes(prev =>
-      prev.map(a =>
-        a.locais.length === 0
-          ? { ...a, locais: [{ local_id: localPadrao.id, quantidade_inicial: '0' }] }
-          : a
-      )
-    );
-  }, [localPadrao, loadingDados, produtoSel]);
+    const [{ data: cats }, { data: units }] =
+      await Promise.all([
+        supabase.from('categorias').select('id, nome').order('nome'),
+        supabase.from('unidades').select('id, sigla, nome').order('sigla'),
+        carregarCatalogo(),
+      ]);
+
+    if (units) setApresentacoes([emptyApresentacao(units, localPadrao)]);
+
+    return { categorias: cats ?? [], unidades: units ?? [] };
+  }, [loadingLocal], { categorias: [], unidades: [] });
+
+  const { categorias, unidades } = dados;
+  const loadingDados = carregando || loadingLocal;
 
   /* ── Fecha o painel de sugestões ao clicar fora ── */
   useEffect(() => {
@@ -724,20 +710,6 @@ export default function CadastroProduto() {
 /* ─────────────────────────────────────────────
    Sub-componentes
 ───────────────────────────────────────────── */
-function SectionHeader({ number, title }) {
-  return (
-    <div className="px-6 py-4 border-b border-app-border-inner flex items-center gap-3">
-      <span className="w-6 h-6 rounded-full bg-app-text text-white flex items-center justify-center text-[11px] font-bold shrink-0">
-        {number}
-      </span>
-      <span className="text-[13px] font-bold text-app-text uppercase tracking-wide">
-        {title}
-      </span>
-    </div>
-  );
-}
-
-/* Tecla desenhada, para as dicas do rodapé do painel. */
 /* Painel de sugestões do catálogo global.
    Não mostra em quais locais o produto existe: além de vazar o que o RLS
    restringe, é irrelevante — o que importa é "esse produto já existe".

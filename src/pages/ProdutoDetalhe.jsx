@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/auth';
@@ -9,10 +9,8 @@ import {
 } from 'lucide-react';
 import { ConfirmDialog, Spinner } from '../components/TabelaCrud';
 import { traduzErro } from '../lib/erros';
-
-function Label({ children }) {
-  return <label className="text-[11px] font-bold text-app-text-label uppercase tracking-widest">{children}</label>;
-}
+import { useCarregamento } from '../lib/useCarregamento';
+import { Label } from '../components/Secao';
 
 export default function ProdutoDetalhe() {
   const { id } = useParams();
@@ -22,10 +20,6 @@ export default function ProdutoDetalhe() {
      carrega o pode_editar, que decide quem vincula local e edita o mínimo. */
   const { locais, localAtual, podeEditarAtual, podeEditarAlgum } = useLocal();
 
-  const [produto, setProduto]       = useState(null);
-  const [categorias, setCategorias] = useState([]);
-  const [unidades, setUnidades]     = useState([]);
-  const [loading, setLoading]       = useState(true);
   const [erro, setErro]             = useState(null);
 
   const [editProduto, setEditProduto] = useState(null);  // { nome, categoria_id }
@@ -36,8 +30,10 @@ export default function ProdutoDetalhe() {
   const [editMin, setEditMin]         = useState(null);  // { estoqueId, valor }
   const [aEstocar, setAEstocar]       = useState([]);     // ids de apresentacao
 
-  const fetch = useCallback(async () => {
-    setLoading(true);
+  /* Uma carga só para os três, porque as três consultas vão juntas de qualquer
+     jeito no Promise.all. O retorno é um objeto e não três estados: assim o
+     recarregar() depois de cada gravação troca tudo num render. */
+  const { dados, carregando: loading, recarregar: fetch } = useCarregamento(async () => {
     const [{ data: prod, error: errProd }, { data: cats }, { data: units }] =
       await Promise.all([
         supabase
@@ -60,13 +56,14 @@ export default function ProdutoDetalhe() {
     if (prod?.apresentacoes) {
       prod.apresentacoes.sort((a, b) => a.descricao.localeCompare(b.descricao));
     }
-    setProduto(prod ?? null);
-    setCategorias(cats ?? []);
-    setUnidades(units ?? []);
-    setLoading(false);
-  }, [id]);
+    return {
+      produto:    prod ?? null,
+      categorias: cats ?? [],
+      unidades:   units ?? [],
+    };
+  }, [id], { produto: null, categorias: [], unidades: [] });
 
-  useEffect(() => { fetch(); }, [fetch]);
+  const { produto, categorias, unidades } = dados;
 
   /* ─── Produto ─── */
   const salvarProduto = async () => {

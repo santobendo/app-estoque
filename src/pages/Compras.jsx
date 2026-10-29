@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useLocal } from '../contexts/local';
 import { ShoppingCart, TrendingUp, Package, AlertCircle } from 'lucide-react';
 import { normalizar, algumContem } from '../lib/texto';
+import { useCarregamento } from '../lib/useCarregamento';
 
 function StatCard({ label, value, sub, color = 'text-app-text' }) {
   return (
@@ -16,28 +17,22 @@ function StatCard({ label, value, sub, color = 'text-app-text' }) {
 
 export default function Compras() {
   const { localAtual, loadingLocal } = useLocal();
-  const [rows, setRows]       = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [busca, setBusca]     = useState('');
+  const [busca, setBusca] = useState('');
 
-  useEffect(() => {
-    if (loadingLocal) return;
-    if (!localAtual) {
-      setRows([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    supabase
+  const { dados: rows, carregando } = useCarregamento(async () => {
+    if (!localAtual) return [];
+    const { data, error } = await supabase
       .from('vw_sugestao_compra')
       .select('*')
       .eq('local_id', localAtual.id)
-      .order('quantidade_sugerida_compra', { ascending: false })
-      .then(({ data }) => {
-        setRows(data ?? []);
-        setLoading(false);
-      });
-  }, [localAtual, loadingLocal]);
+      .order('quantidade_sugerida_compra', { ascending: false });
+    if (error) throw error;
+    return data ?? [];
+  }, [localAtual?.id], []);
+
+  /* Espera o provider decidir qual é o local antes de dizer "nada a comprar":
+     sem o loadingLocal aqui a tela piscaria o vazio no primeiro render. */
+  const loading = carregando || loadingLocal;
 
   /* Normaliza o termo uma vez, não a cada linha da tabela. */
   const termo = useMemo(() => normalizar(busca).trim(), [busca]);

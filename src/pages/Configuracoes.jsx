@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/auth';
 import {
@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import TabelaCrud, { ConfirmDialog, Spinner } from '../components/TabelaCrud';
 import { traduzErro } from '../lib/erros';
+import { useCarregamento } from '../lib/useCarregamento';
 
 const DOMINIO = '@estoque.com';
 
@@ -481,24 +482,23 @@ function ModalEditarUsuario({ usuario, papeis, isMe, onSucesso, onFechar }) {
 /* ─── Aba Usuários ─── */
 function AbaUsuarios({ papeis }) {
   const { user: currentUser } = useAuth();
-  const [rows, setRows]               = useState([]);
-  const [loading, setLoading]         = useState(true);
   const [confirmacao, setConfirmacao] = useState(null);
   const [erro, setErro]               = useState(null);
   const [modalAberto, setModalAberto] = useState(false);
   const [usuarioEditando, setUsuarioEditando] = useState(null);
 
-  const fetch = useCallback(async () => {
-    setLoading(true);
-    const { data } = await supabase
-      .from('perfis')
-      .select('id, nome, is_admin, ativo, papel_id, papeis(nome)')
-      .order('nome');
-    setRows(data ?? []);
-    setLoading(false);
-  }, []);
-
-  useEffect(() => { fetch(); }, [fetch]);
+  const { dados: rows, carregando: loading, recarregar: fetch } = useCarregamento(
+    async () => {
+      const { data, error } = await supabase
+        .from('perfis')
+        .select('id, nome, is_admin, ativo, papel_id, papeis(nome)')
+        .order('nome');
+      if (error) throw error;
+      return data ?? [];
+    },
+    [],
+    [],
+  );
 
   const toggleAtivo = (row) => {
     if (row.id === currentUser?.id) return;
@@ -724,10 +724,18 @@ function AbaAcessos() {
   const [loading, setLoading] = useState(true);
   const [erro, setErro]       = useState(null);
 
-  /* Sem setLoading(true) aqui de propósito: 'loading' já nasce true para a
-     carga inicial, e o refetch que segue um erro atualiza a matriz no lugar,
-     sem piscar o "Carregando..." por cima de uma grade que já está na tela. */
-  const fetch = useCallback(async () => {
+  /* Esta aba é a exceção do useCarregamento: ela grava nos próprios estados em
+     vez de usar o `dados` que o hook devolve, e mantém o `loading` dela.
+
+     São dois motivos. O 'acessos' é alterado de forma otimista a cada clique,
+     antes da resposta do servidor (ver mais abaixo), então precisa ser estado
+     desta aba e não um derivado da carga. E o 'loading' não volta a ser true
+     no refetch de propósito: ele já nasce true para a carga inicial, e o
+     refetch que segue um erro atualiza a matriz no lugar, sem piscar o
+     "Carregando..." por cima de uma grade que já está na tela.
+
+     Do hook, aqui, só interessa o recarregar() e o efeito de carga. */
+  const { recarregar: fetch } = useCarregamento(async () => {
     const [{ data: pfs }, { data: locs }, { data: uls }] = await Promise.all([
       supabase.from('perfis').select('id, nome, is_admin, ativo, papeis(nome)').order('nome'),
       supabase.from('locais').select('id, nome, ativo').order('nome'),
@@ -738,8 +746,6 @@ function AbaAcessos() {
     setAcessos(new Map((uls ?? []).map(a => [chaveAcesso(a.usuario_id, a.local_id), a.pode_editar])));
     setLoading(false);
   }, []);
-
-  useEffect(() => { fetch(); }, [fetch]);
 
   const nivelDe = (usuarioId, localId) => {
     const podeEditar = acessos.get(chaveAcesso(usuarioId, localId));
