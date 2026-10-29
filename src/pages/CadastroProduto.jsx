@@ -12,8 +12,14 @@ import { useToast } from '../lib/toast';
 import { normalizar } from '../lib/texto';
 
 /* A comparação roda no cliente porque o catálogo inteiro cabe em poucos KB:
-   busca instantânea, sem debounce nem ida ao servidor a cada tecla. */
-const MAX_SUGESTOES = 8;
+   busca instantânea, sem debounce nem ida ao servidor a cada tecla.
+
+   O teto era 8 e cortava calado, o que aqui é pior que no combobox de
+   Movimentações: este painel existe justamente para evitar cadastro
+   duplicado. Quem digitava "fita", via oito e não achava a sua, concluía
+   que não existia e cadastrava de novo — o painel produzia a duplicata que
+   devia impedir. Subiu o teto, e o rodapé agora diz quantos ficaram fora. */
+const MAX_SUGESTOES = 50;
 
 /* ─────────────────────────────────────────────
    Componente de rótulo de campo
@@ -186,12 +192,12 @@ export default function CadastroProduto() {
 
   /* ── Sugestões do catálogo ── */
   const termo = normalizar(nomeProduto).trim();
-  const sugestoes = useMemo(() => {
+  const encontrados = useMemo(() => {
     if (produtoSel || termo.length < 2) return [];
-    return catalogo
-      .filter(p => normalizar(p.nome).includes(termo))
-      .slice(0, MAX_SUGESTOES);
+    return catalogo.filter(p => normalizar(p.nome).includes(termo));
   }, [catalogo, termo, produtoSel]);
+
+  const sugestoes = useMemo(() => encontrados.slice(0, MAX_SUGESTOES), [encontrados]);
 
   const painelAberto = buscaAberta && !produtoSel && termo.length >= 2;
 
@@ -566,6 +572,7 @@ export default function CadastroProduto() {
                   {painelAberto && (
                     <SugestoesPainel
                       sugestoes={sugestoes}
+                      total={encontrados.length}
                       termoDigitado={nomeProduto.trim()}
                       indiceAtivo={indiceAtivo}
                       onHover={setIndiceAtivo}
@@ -738,10 +745,11 @@ function SectionHeader({ number, title }) {
    O mouse escreve no mesmo indiceAtivo que as setas, então os dois nunca
    destacam linhas diferentes ao mesmo tempo. */
 function SugestoesPainel({
-  sugestoes, termoDigitado, indiceAtivo, onSelecionar, onCriarNovo, onHover,
+  sugestoes, total, termoDigitado, indiceAtivo, onSelecionar, onCriarNovo, onHover,
 }) {
   const itemAtivoRef = useRef(null);
   const indiceCriar  = sugestoes.length;
+  const ocultos      = total - sugestoes.length;
 
   /* Mantém a linha destacada visível quando a navegação passa do fim da área
      rolável. 'nearest' evita o salto de rolagem quando ela já está à vista. */
@@ -796,6 +804,16 @@ function SugestoesPainel({
           );
         })}
       </div>
+
+      {/* Avisa antes do caminho de criação, que é onde a duplicata nasce:
+          se há produto fora da lista, o usuário precisa saber disso antes de
+          decidir que o dele não existe. */}
+      {ocultos > 0 && (
+        <div className="px-4 py-1.5 border-t border-app-border-inner bg-amber-50 text-amber-800 text-[11px] font-semibold">
+          Mostrando {sugestoes.length} de {total} produtos com “{termoDigitado}”.
+          Digite mais para ver os outros {ocultos}.
+        </div>
+      )}
 
       {/* Caminho de criação — sempre presente, sempre por último. */}
       <button

@@ -28,6 +28,11 @@ function formatarData(iso) {
   });
 }
 
+/* O modal lista as mais recentes, que é o caso de uso real: ninguém entrega
+   contra uma requisição de semanas atrás. O número vale ser constante porque
+   o estado vazio da busca o cita. */
+const LIMITE_LISTA = 50;
+
 const num = (v) => {
   const n = Number(v);
   return Number.isInteger(n) ? String(n) : n.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
@@ -77,7 +82,7 @@ function ModalRequisicoes({ onSelecionar, onFechar }) {
       .from('vw_requisicoes')
       .select('id, criado_em, atualizado_em, digitado_por, entregue_por, digitado_por_nome, entregue_por_nome, itens')
       .order('atualizado_em', { ascending: false })
-      .limit(50)
+      .limit(LIMITE_LISTA)
       .then(({ data }) => {
         if (!vivo) return;
         setLista(data ?? []);
@@ -87,7 +92,12 @@ function ModalRequisicoes({ onSelecionar, onFechar }) {
   }, []);
 
   /* Busca por número é o caso principal, mas filtrar pelos nomes de quem
-     digitou ou entregou sai de graça e resolve "aquela que o Pedro abriu". */
+     digitou ou entregou sai de graça e resolve "aquela que o Pedro abriu".
+
+     O filtro roda sobre as LIMITE_LISTA mais recentes, não sobre o banco:
+     requisição mais antiga que isso não é encontrável aqui. O estado vazio
+     diz isso em voz alta — a alternativa de buscar no servidor por número
+     fica para quando o volume justificar. */
   const filtradas = useMemo(() => {
     const termo = normalizar(busca).trim();
     if (!termo) return lista;
@@ -170,7 +180,9 @@ function ModalRequisicoes({ onSelecionar, onFechar }) {
             <p className="py-10 text-center text-[12px] text-app-text-secondary">
               {lista.length === 0
                 ? 'Nenhuma requisição foi criada ainda. Use "Nova requisição".'
-                : 'Nenhuma requisição encontrada para essa busca.'}
+                : lista.length >= LIMITE_LISTA
+                  ? `Nada encontrado entre as ${LIMITE_LISTA} requisições mais recentes, que são as únicas listadas aqui. Se a que você procura for mais antiga, ela não aparece nesta busca.`
+                  : 'Nenhuma requisição encontrada para essa busca.'}
             </p>
           ) : (
             filtradas.map((r, i) => (

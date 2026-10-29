@@ -33,8 +33,14 @@ function Spinner() {
 
    O catálogo vem de uma consulta só, no lugar de um ilike por tecla: com
    ida ao servidor a cada letra a navegação por teclado fica intragável, e
-   o ilike ainda ignora acento ("acucar" não achava "AÇÚCAR"). */
-const MAX_RESULTADOS = 10;
+   o ilike ainda ignora acento ("acucar" não achava "AÇÚCAR").
+
+   O teto era 10, e cortava calado: quem buscava "fita" via dez itens em
+   ordem alfabética e não tinha como saber que "fita transparente" ficou de
+   fora — o jeito de descobrir era abrir o catálogo. O número subiu, mas o
+   que conserta o bug é o rodapé dizer quantos sobraram: teto nenhum é
+   grande o bastante se o corte é invisível. */
+const MAX_RESULTADOS = 50;
 
 /* A requisição ativa vive no sessionStorage, não só na memória da tela: um F5
    no meio de uma requisição de 15 itens começaria outra e partiria a original
@@ -71,12 +77,13 @@ function ProdutoBusca({ valor, onValorChange, onSelect, erro, inputRef }) {
 
   const termo = normalizar(valor).trim();
 
-  const resultados = useMemo(() => {
+  const encontrados = useMemo(() => {
     if (!termo) return [];
-    return catalogo
-      .filter(p => normalizar(p.nome).includes(termo))
-      .slice(0, MAX_RESULTADOS);
+    return catalogo.filter(p => normalizar(p.nome).includes(termo));
   }, [catalogo, termo]);
+
+  const resultados = useMemo(() => encontrados.slice(0, MAX_RESULTADOS), [encontrados]);
+  const ocultos    = encontrados.length - resultados.length;
 
   const painelAberto = aberto && termo.length > 0;
 
@@ -206,6 +213,13 @@ function ProdutoBusca({ valor, onValorChange, onSelect, erro, inputRef }) {
                 <span><Kbd>↑</Kbd><Kbd>↓</Kbd> navegar</span>
                 <span><Kbd>↵</Kbd> selecionar</span>
                 <span><Kbd>esc</Kbd> fechar</span>
+                {/* Nunca cortar calado: sem esta contagem o usuário não tem
+                    como saber que existe resultado fora da lista. */}
+                <span className={`ml-auto text-right tabular-nums ${ocultos > 0 ? 'text-amber-600 font-semibold' : ''}`}>
+                  {ocultos > 0
+                    ? `${resultados.length} de ${encontrados.length} · refine a busca`
+                    : `${encontrados.length} ${encontrados.length === 1 ? 'resultado' : 'resultados'}`}
+                </span>
               </div>
             </>
           ) : (
