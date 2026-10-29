@@ -39,8 +39,7 @@ const num = (v) => {
 };
 
 /* ─── Cartão de opção, no mesmo padrão da seção 1 (Tipo de Movimentação) ─── */
-function CartaoOpcao({ ativo, onClick, icone, titulo, descricao, cor }) {
-  const Icone = icone;
+function CartaoOpcao({ ativo, onClick, icone: Icone, titulo, descricao, cor }) {
   const paleta = {
     indigo:  ativo ? 'border-indigo-400 bg-indigo-50 text-indigo-700'   : 'border-app-border hover:border-indigo-200 text-app-text-secondary',
     sky:     ativo ? 'border-sky-400 bg-sky-50 text-sky-700'            : 'border-app-border hover:border-sky-200 text-app-text-secondary',
