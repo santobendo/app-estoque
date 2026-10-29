@@ -4,7 +4,7 @@ import {
   LayoutGrid, ArrowRightLeft, History,
   ShoppingCart, Settings, Box, LogOut, ClipboardList, FileText,
 } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 
 function Sidebar() {
   const { user, perfil, isAdmin, signOut } = useAuth();

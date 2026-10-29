@@ -3,7 +3,7 @@ import { Outlet } from 'react-router-dom';
 import { UserX } from 'lucide-react';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 
 function MainLayout() {
   const { perfil, signOut } = useAuth();

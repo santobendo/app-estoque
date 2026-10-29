@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/auth';
 import {
   Shield, ShieldOff, UserCheck, UserX, AlertCircle, X,
   Plus, Eye, EyeOff, UserPlus, Info, AtSign, Pencil,
   MapPin, Minus, SlidersHorizontal, TriangleAlert,
 } from 'lucide-react';
-import TabelaCrud, { ConfirmDialog, Spinner, traduzErro } from '../components/TabelaCrud';
+import TabelaCrud, { ConfirmDialog, Spinner } from '../components/TabelaCrud';
+import { traduzErro } from '../lib/erros';
 
 const DOMINIO = '@estoque.com';
 

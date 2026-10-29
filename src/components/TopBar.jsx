@@ -1,8 +1,8 @@
 import React from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import { MapPin, ChevronsUpDown, Globe, Eye } from 'lucide-react';
-import { useLocal } from '../contexts/LocalContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useLocal } from '../contexts/local';
+import { useAuth } from '../contexts/auth';
 
 /* Rotas onde o local selecionado não muda nada — nem o que se lê, nem o que
    se grava. "/produtos" e "/cadastro-produto" já estiveram nesta lista: leem

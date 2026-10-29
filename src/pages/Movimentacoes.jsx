@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { useAuth } from '../contexts/AuthContext';
-import { useLocal } from '../contexts/LocalContext';
+import { useAuth } from '../contexts/auth';
+import { useLocal } from '../contexts/local';
 import {
   Search, ArrowDownCircle, ArrowUpCircle, AlertCircle, Scale, Eye,
   CornerDownLeft,
 } from 'lucide-react';
-import { traduzErro } from '../components/TabelaCrud';
+import { traduzErro } from '../lib/erros';
 import Kbd from '../components/Kbd';
 import { Label, SectionHeader } from '../components/Secao';
 import SecaoRequisicao from '../components/SecaoRequisicao';

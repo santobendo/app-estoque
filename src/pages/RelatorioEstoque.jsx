@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { useLocal } from '../contexts/LocalContext';
+import { useLocal } from '../contexts/local';
 import { Search, Download, Printer, Package } from 'lucide-react';
 import { normalizar, algumContem } from '../lib/texto';
 import { hojeParaInput } from '../lib/datas';

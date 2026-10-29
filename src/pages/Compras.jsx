@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { useLocal } from '../contexts/LocalContext';
+import { useLocal } from '../contexts/local';
 import { ShoppingCart, TrendingUp, Package, AlertCircle } from 'lucide-react';
 import { normalizar, algumContem } from '../lib/texto';
 

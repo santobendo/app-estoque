@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { useAuth } from './AuthContext';
+import { useAuth } from './auth';
+import { LocalContext } from './local';
 
-const LocalContext = createContext({});
 const STORAGE_KEY = 'app-estoque:local-atual';
 
 /* Guarda o local (estoque) selecionado na barra superior.
@@ -83,5 +83,3 @@ export function LocalProvider({ children }) {
     </LocalContext.Provider>
   );
 }
-
-export const useLocal = () => useContext(LocalContext);

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { useLocal } from '../contexts/LocalContext';
-import { useAuth } from '../contexts/AuthContext';
+import { useLocal } from '../contexts/local';
+import { useAuth } from '../contexts/auth';
 import { Search, ArrowDownCircle, ArrowUpCircle, ChevronLeft, ChevronRight, Trash2 } from 'lucide-react';
-import { ConfirmDialog, traduzErro } from '../components/TabelaCrud';
+import { ConfirmDialog } from '../components/TabelaCrud';
+import { traduzErro } from '../lib/erros';
 import { useToast } from '../lib/toast';
 import { normalizar } from '../lib/texto';
 import { inicioDoDiaISO, fimDoDiaISO } from '../lib/datas';

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, Filter, Package } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useNavigate } from 'react-router-dom';
-import { useLocal } from '../contexts/LocalContext';
+import { useLocal } from '../contexts/local';
 import { normalizar, algumContem } from '../lib/texto';
 
 function Catalog() {

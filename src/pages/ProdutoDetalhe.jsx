@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
-import { useAuth } from '../contexts/AuthContext';
-import { useLocal } from '../contexts/LocalContext';
+import { useAuth } from '../contexts/auth';
+import { useLocal } from '../contexts/local';
 import {
   ChevronLeft, Package, Plus, Pencil, Trash2, Check, X,
   MapPin, AlertCircle, Box,
 } from 'lucide-react';
-import { ConfirmDialog, Spinner, traduzErro } from '../components/TabelaCrud';
+import { ConfirmDialog, Spinner } from '../components/TabelaCrud';
+import { traduzErro } from '../lib/erros';
 
 function Label({ children }) {
   return <label className="text-[11px] font-bold text-app-text-label uppercase tracking-widest">{children}</label>;

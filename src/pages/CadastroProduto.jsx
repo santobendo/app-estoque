@@ -5,8 +5,8 @@ import {
   Search, CornerDownLeft, Eye,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { useLocal } from '../contexts/LocalContext';
-import { traduzErro } from '../components/TabelaCrud';
+import { useLocal } from '../contexts/local';
+import { traduzErro } from '../lib/erros';
 import Kbd from '../components/Kbd';
 import { useToast } from '../lib/toast';
 import { normalizar } from '../lib/texto';

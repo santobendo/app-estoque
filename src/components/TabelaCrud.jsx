@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { traduzErro } from '../lib/erros';
 import { Plus, Pencil, Trash2, Check, X, AlertCircle, UserCheck, UserX } from 'lucide-react';
 
 /* ─── helpers compartilhados ─── */
@@ -24,18 +25,6 @@ export function ConfirmDialog({ mensagem, onConfirm, onCancel }) {
       </div>
     </div>
   );
-}
-
-export function traduzErro(error) {
-  if (!error) return null;
-  switch (error.code) {
-    case '23505': return 'Já existe um registro com esse nome/sigla.';
-    case '23503': return 'Não é possível excluir: este registro está sendo usado em outro cadastro.';
-    case '23502': return 'Preencha os campos obrigatórios.';
-    case '23514': return 'Operação bloqueada: o saldo em estoque não pode ficar negativo.';
-    case '42501': return 'Você não tem permissão para esta operação.';
-    default:      return error.message;
-  }
 }
 
 /* ─── CRUD genérico para tabelas de cadastro ───
