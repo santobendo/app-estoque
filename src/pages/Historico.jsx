@@ -79,13 +79,22 @@ export default function Historico() {
      resposta é zero sem ninguém precisar gravar nada.
 
      Um handler em cada filtro não resolveria: `localAtual` vem do contexto e
-     muda sem passar por handler nenhum desta tela. */
+     muda sem passar por handler nenhum desta tela.
+
+     Efeito colateral de derivar: quando a chave *volta* a um valor em que o
+     usuário já paginou, o número da página volta com ela. Na maioria dos
+     caminhos isso é bom — digitar na busca e apagar devolve o usuário ao lugar
+     onde ele estava em vez de jogá-lo na primeira página. A exceção é o botão
+     Limpar, que quer dizer recomeçar: lá a paginação é zerada à mão. */
   const chaveFiltros = [
     filtroTipo, filtroMotivo, filtroInicio, filtroFim, busca, localAtual?.id,
   ].join('|');
   const [paginado, setPaginado] = useState({ chave: null, valor: 0 });
   const pagina = paginado.chave === chaveFiltros ? paginado.valor : 0;
   const irParaPagina = (valor) => setPaginado({ chave: chaveFiltros, valor });
+  /* chave nula não bate com chaveFiltros nenhuma, então a página volta a zero
+     e fica lá até alguém paginar de novo. */
+  const esquecerPagina = () => setPaginado({ chave: null, valor: 0 });
 
   useEffect(() => {
     supabase
@@ -272,6 +281,7 @@ export default function Historico() {
             onClick={() => {
               setBusca(''); setFiltroTipo(''); setFiltroMotivo('');
               setFiltroInicio(''); setFiltroFim('');
+              esquecerPagina();
             }}
           >
             Limpar
