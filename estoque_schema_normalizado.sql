@@ -42,6 +42,19 @@ create table perfis (
   criado_em     timestamptz not null default now(),
   atualizado_em timestamptz not null default now(),
 
+  -- Preferência individual, não parâmetro do sistema: depende do id do usuário
+  -- e de mais nada, então é atributo da pessoa e não tabela separada. O
+  -- prefixo agrupa — quando o tema seguir a pessoa entre aparelhos, ele entra
+  -- como preferencia_tema aqui ao lado.
+  preferencia_requisicao text not null default 'sem',
+
+  -- Só 'sem' e 'nova'. 'existente' é a terceira opção da tela, mas não é
+  -- estado em que ela possa ABRIR: significa "comece de uma requisição que eu
+  -- ainda não escolhi", e a validação recusaria a gravação até o usuário
+  -- escolher uma.
+  constraint perfis_preferencia_requisicao_check
+    check (preferencia_requisicao in ('sem', 'nova')),
+
   constraint perfis_id_fk
     foreign key (id) references auth.users(id) on delete cascade,
 
@@ -54,6 +67,7 @@ comment on column perfis.id       is 'Mesmo UUID do auth.users — não é gerad
 comment on column perfis.papel_id is 'FK para papeis — cargo/função operacional do usuário.';
 comment on column perfis.is_admin is 'Flag técnico de sistema. Se true, o usuário pode gerenciar perfis, papéis e dados mestres. Independente do papel operacional.';
 comment on column perfis.ativo    is 'Se false, o usuário não pode realizar operações no sistema.';
+comment on column perfis.preferencia_requisicao is 'Preferência do usuário: com qual opção de requisição a tela de Movimentações abre. sem = como era antes; nova = já começa uma requisição. Preferência individual, não parâmetro do sistema.';
 
 -- Trigger: cria o perfil automaticamente ao criar usuário no Supabase Auth
 create or replace function fn_cria_perfil()
@@ -649,7 +663,21 @@ select
     coalesce(p.nome, '') || ' ' ||
     coalesce(a.descricao, '') || ' ' ||
     coalesce(pf.nome, '')
-  ))                                       as busca
+  ))                                       as busca,
+  -- Última de propósito: create or replace view não deixa mudar nome, tipo
+  -- nem ordem das colunas existentes, só acrescentar no fim. Colocá-la no
+  -- meio obrigaria a migração a fazer drop + create, e o drop levaria embora
+  -- o grant da view — que é justamente o 42501 da migração 08.
+  --
+  -- O join é left porque requisicao_item_id é null na movimentação comum, e é
+  -- no máximo 1:1 (ri.id é chave primária), então a view não multiplica
+  -- linha: a paginação do Histórico continua contando certo.
+  --
+  -- O RLS de requisicao_itens (fn_pode_ver_local) também se aplica aqui pelo
+  -- security_invoker, mas não há como ver a movimentação e não ver o item:
+  -- fn_registra_saida_requisicao cria o item com o local_id do próprio
+  -- estoque da movimentação, então os dois recortes são o mesmo local.
+  ri.requisicao_id                         as requisicao_id
 from movimentacoes            m
 join estoques                 e  on e.id  = m.estoque_id
 join apresentacoes            a  on a.id  = e.apresentacao_id
@@ -659,6 +687,7 @@ join locais                   l  on l.id  = e.local_id
 join perfis                   pf on pf.id = m.criado_por
 left join papeis              pa on pa.id = pf.papel_id
 left join motivos_movimentacao mo on mo.id = m.motivo_id
+left join requisicao_itens    ri on ri.id = m.requisicao_item_id
 order by m.data desc;
 
 -- security_invoker: sem isto a view roda com a permissão do dono e
@@ -666,7 +695,7 @@ order by m.data desc;
 alter view vw_auditoria_movimentacoes set (security_invoker = on);
 
 comment on view vw_auditoria_movimentacoes is
-  'Histórico completo de movimentações com produto, local e usuário responsável. A coluna busca concatena produto, apresentação e usuário sem acento, para o filtro de texto da tela.';
+  'Histórico completo de movimentações com produto, local, usuário responsável e requisição de origem. A coluna busca concatena produto, apresentação e usuário sem acento, para o filtro de texto da tela.';
 
 -- -------------------------------------------------------------
 -- 14.1 VIEW — requisições (cabeçalho)

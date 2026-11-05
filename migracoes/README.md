@@ -1,21 +1,16 @@
 # Migrações
 
-**A pasta está vazia: não há migração pendente.**
+| Migração | Testes | Produção A | Produção B |
+|---|---|---|---|
+| `09_preferencias_e_req_no_historico.md` | — | — | — |
+
+Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os três estiverem
+em dia.
 
 As migrações 01 a 08 foram aplicadas nos três bancos — testes e as duas instâncias de
 produção — e o conteúdo delas já está consolidado no
 **`estoque_schema_normalizado.sql`**, na raiz do projeto. Por isso foram removidas da
 árvore de trabalho (veja como recuperá-las abaixo).
-
-Quando aparecer migração nova, ela entra aqui e volta uma tabela como esta, para
-controlar o que já rodou em cada banco:
-
-| Migração | Testes | Produção A | Produção B |
-|---|---|---|---|
-| `NN_descricao.md` | — | — | — |
-
-Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os três estiverem
-em dia.
 
 ## Como criar um banco novo
 
