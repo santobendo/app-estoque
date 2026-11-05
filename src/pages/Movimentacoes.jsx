@@ -264,17 +264,26 @@ export default function Movimentacoes() {
   const [data, setData]                 = useState(agoraParaInput);
 
   /* ── requisição ──
-     opcao: 'nova' | 'existente' | 'sem'. O padrão é 'sem' para a tela abrir
-     se comportando exatamente como antes; quem vai trabalhar por requisição
-     escolhe no primeiro clique. Quando houver tela de parâmetros, este default
-     é o primeiro candidato a virar configuração do admin. */
-  const [opcaoReq, setOpcaoReq] = useState(() => {
+     opcao: 'nova' | 'existente' | 'sem'.
+
+     O estado guarda só a escolha EXPLÍCITA desta sessão, e `null` significa
+     "ainda não escolheu". O valor que a tela usa é derivado logo abaixo, com
+     a preferência do perfil no meio do caminho.
+
+     Derivado, e não semeado por efeito, pelo mesmo motivo do digitadoEfetivo:
+     o AuthProvider libera os filhos no `finally` do getSession, mas o perfil
+     vem de uma segunda consulta que ninguém espera — então no primeiro render
+     `perfil` é null, um useState com a preferência dentro leria null e
+     congelaria em 'sem', e um efeito para corrigir depois seria render em
+     cascata com setState dentro de efeito. */
+  const [opcaoEscolhida, setOpcaoEscolhida] = useState(() => {
     try {
-      return JSON.parse(sessionStorage.getItem(CHAVE_REQ) ?? 'null')?.opcao ?? 'sem';
+      return JSON.parse(sessionStorage.getItem(CHAVE_REQ) ?? 'null')?.opcao ?? null;
     } catch {
-      return 'sem';
+      return null;
     }
   });
+  const opcaoReq = opcaoEscolhida ?? perfil?.preferencia_requisicao ?? 'sem';
   const [requisicao, setRequisicao]       = useState(null);
   const [versaoItens, setVersaoItens]     = useState(0);
   const [qtdSolicitada, setQtdSolicitada] = useState('');
@@ -322,22 +331,38 @@ export default function Movimentacoes() {
       .then(({ data }) => {
         if (!vivo) return;
         if (data) setRequisicao(data);
-        else { setOpcaoReq('sem'); try { sessionStorage.removeItem(CHAVE_REQ); } catch { /* modo privado */ } }
+        /* 'sem' aqui e escolha explicita: o numero que estava ativo morreu, e
+           abrir em modo requisicao sem requisicao seria pior. Nao apaga a chave
+           a mao — o efeito de persistencia abaixo reescreve com 'sem'. */
+        else setOpcaoEscolhida('sem');
       });
     return () => { vivo = false; };
   }, []);
 
-  /* ─ Guarda a requisição ativa ─
+  /* ─ Guarda a escolha desta sessão ─
      O primeiro render é ignorado de propósito: ele rodaria com o estado
-     inicial e apagaria o id que o efeito de restauração ainda vai buscar. */
+     inicial e apagaria o id que o efeito de restauração ainda vai buscar.
+
+     Guarda `opcaoEscolhida`, não o `opcaoReq` derivado: a chave representa o
+     que o usuário escolheu nesta aba, e enquanto ele não escolher nada é a
+     preferência do perfil que tem de mandar. Se gravasse o derivado, o valor
+     da preferência viraria "escolha" no instante em que o perfil chegasse, e
+     mudar a preferência depois não teria efeito nesta aba.
+
+     E guarda também o 'sem', em vez de apagar a chave como antes: 'sem' era o
+     padrão, então apagar bastava; agora que a preferência pode ser 'nova',
+     apagar faria o F5 ressuscitar 'nova' e perder a escolha do usuário. */
   const primeiroRender = useRef(true);
   useEffect(() => {
     if (primeiroRender.current) { primeiroRender.current = false; return; }
+    if (opcaoEscolhida === null) return;
     try {
-      if (opcaoReq === 'sem') sessionStorage.removeItem(CHAVE_REQ);
-      else sessionStorage.setItem(CHAVE_REQ, JSON.stringify({ opcao: opcaoReq, id: requisicao?.id ?? null }));
+      sessionStorage.setItem(CHAVE_REQ, JSON.stringify({
+        opcao: opcaoEscolhida,
+        id: requisicao?.id ?? null,
+      }));
     } catch { /* aba privada sem storage: a requisição ainda funciona nesta tela */ }
-  }, [opcaoReq, requisicao]);
+  }, [opcaoEscolhida, requisicao]);
 
   /* ─ Itens já lançados na requisição ativa ─
      Depende do id e de versaoItens: o contador é incrementado depois de cada
@@ -456,7 +481,7 @@ export default function Movimentacoes() {
      saídas de um pedido, e entrada ou ajuste não fazem parte dele. Fica nos
      handlers dos cartões, e não num efeito, porque é consequência do clique. */
   const encerrarRequisicao = () => {
-    setOpcaoReq('sem');
+    setOpcaoEscolhida('sem');
     setRequisicao(null);
     setQtdSolicitada('');
   };
@@ -465,7 +490,7 @@ export default function Movimentacoes() {
      "sem requisição" quer baixa solta. Se for sem querer, a opção 2 traz a
      requisição de volta em um clique — ela é a primeira da lista. */
   const trocarOpcaoReq = (nova) => {
-    setOpcaoReq(nova);
+    setOpcaoEscolhida(nova);
     setRequisicao(null);
     setQtdSolicitada('');
     setErros(e => {

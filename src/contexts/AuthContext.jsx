@@ -17,7 +17,7 @@ export const AuthProvider = ({ children }) => {
     try {
       const { data } = await supabase
         .from('perfis')
-        .select('id, nome, is_admin, ativo, papel_id, papeis(nome)')
+        .select('id, nome, is_admin, ativo, papel_id, preferencia_requisicao, papeis(nome)')
         .eq('id', userId)
         .single();
       setPerfil(data ?? null);
@@ -68,6 +68,12 @@ export const AuthProvider = ({ children }) => {
     user,
     perfil,
     isAdmin: perfil?.is_admin === true,
+    /* Para a tela de Preferências relê o perfil depois de gravar. Sem isto a
+       preferência só valeria no próximo F5, e a tela de Movimentações
+       continuaria abrindo com a antiga nesta sessão. Função simples, sem
+       useCallback: o `value` já é objeto novo a cada render, e ela é chamada
+       de handler, nunca de lista de dependências. */
+    refreshPerfil: () => fetchPerfil(user?.id ?? null),
     signOut: () => supabase.auth.signOut(),
   };
 

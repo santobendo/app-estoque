@@ -253,11 +253,25 @@ somar a entrega, e o 4 a requisição cruzando locais.
 
 ## 7. Fora do escopo, registrado para não se perder
 
-- **Tela de parâmetros em Configurações** — sua ideia para o admin escolher defaults como
-  a opção de requisição que vem selecionada, e depois o modo escuro. Boa, e o default de
-  requisição é o primeiro candidato: hoje ele é uma constante em `Movimentacoes.jsx`.
-- **Requisição na tela de Histórico** — mostrar "Req #12" na linha da movimentação sairia
-  barato (a coluna já existe), mas não estava no pedido e eu não quis ampliar escopo.
+- ~~**Tela de parâmetros em Configurações**~~ — feita em 04/11/2026 como **tela de
+  Preferências**, na migração 09. O nome mudou junto com o entendimento, e a distinção é
+  sua: **preferência** é do usuário, **parâmetro** é o ajuste que o admin faz para todos.
+  Por isso ela não é aba de Configurações — aquela tela é bloqueada para não-admin — e
+  por isso o valor é coluna em `perfis` e não tabela: depende do id do usuário e de mais
+  nada. Guarda só a opção de requisição; o modo escuro ficou de fora por decisão sua.
+  **Pendente:** ela está como item do menu lateral e vai para o bloco do usuário, no pé
+  da barra, quando aquele bloco virar menu.
+- ~~**Requisição na tela de Histórico**~~ — feita em 04/11/2026, migração 09: coluna
+  "Req" com `#12` ou travessão. A ligação já existia em
+  `movimentacoes.requisicao_item_id`; o que faltava era a `vw_auditoria_movimentacoes`
+  expor `requisicao_id`.
+- **Parâmetros do sistema** — quando aparecer o primeiro ajuste que o admin faz para
+  todos, ele não cabe em `perfis`: entra em tabela própria, de **uma linha com colunas
+  tipadas** (`create table parametros (id boolean primary key default true check (id),
+  ...)`), nunca chave/valor. As duas telas convivem; são coisas diferentes.
+- **Filtro por requisição no Histórico** — agora que a coluna aparece, filtrar por número
+  é o passo natural. Barato: a view já devolve `requisicao_id`, é um `.eq()` a mais e um
+  campo no bloco de filtros.
 - **Telas dedicadas de requisição** — criar o pedido antes da entrega, entrega parcial,
   data escolhida à mão (ver a coluna `data` na seção 1), edição da solicitada.
 - ~~**`Label`/`SectionHeader` duplicados** em `CadastroProduto.jsx` e

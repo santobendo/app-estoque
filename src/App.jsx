@@ -19,6 +19,7 @@ import ProdutoDetalhe     from './pages/ProdutoDetalhe';
 import CadastroCategorias from './pages/CadastroCategorias';
 import CadastroLocais     from './pages/CadastroLocais';
 import CadastroUnidades   from './pages/CadastroUnidades';
+import Preferencias       from './pages/Preferencias';
 
 function App() {
   return (
@@ -41,6 +42,7 @@ function App() {
             <Route path="cadastros/categorias" element={<CadastroCategorias />} />
             <Route path="cadastros/locais"     element={<CadastroLocais />} />
             <Route path="cadastros/unidades"   element={<CadastroUnidades />} />
+            <Route path="preferencias"     element={<Preferencias />} />
             <Route path="configuracoes"    element={<Configuracoes />} />
             <Route path="*"               element={<div className="p-8 text-app-text-secondary">Página não encontrada.</div>} />
           </Route>

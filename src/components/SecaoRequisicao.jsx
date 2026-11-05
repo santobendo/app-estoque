@@ -7,6 +7,7 @@ import { normalizar } from '../lib/texto';
 import Kbd from './Kbd';
 import { Spinner } from './TabelaCrud';
 import { Label, SectionHeader } from './Secao';
+import CartaoOpcao from './CartaoOpcao';
 
 /* ─── Seção "Requisição" da tela de Movimentações ───
    Mora aqui, e não dentro de Movimentacoes.jsx, porque aquela tela já é a mais
@@ -39,27 +40,6 @@ const num = (v) => {
 };
 
 /* ─── Cartão de opção, no mesmo padrão da seção 1 (Tipo de Movimentação) ─── */
-function CartaoOpcao({ ativo, onClick, icone: Icone, titulo, descricao, cor }) {
-  const paleta = {
-    indigo:  ativo ? 'border-indigo-400 bg-indigo-50 text-indigo-700'   : 'border-app-border hover:border-indigo-200 text-app-text-secondary',
-    sky:     ativo ? 'border-sky-400 bg-sky-50 text-sky-700'            : 'border-app-border hover:border-sky-200 text-app-text-secondary',
-    neutro:  ativo ? 'border-app-text bg-app-bg text-app-text'          : 'border-app-border hover:border-app-text-label text-app-text-secondary',
-  };
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={ativo}
-      className={`flex items-center gap-3 p-4 rounded-xl border-[1.5px] transition-all cursor-pointer ${paleta[cor]}`}
-    >
-      <Icone size={22} className="shrink-0" />
-      <div className="text-left">
-        <p className="text-[13px] font-bold">{titulo}</p>
-        <p className="text-[11px] opacity-75">{descricao}</p>
-      </div>
-    </button>
-  );
-}
 
 /* ─── Modal de requisição existente ───
    Teclado no mesmo padrão do combobox de produto: setas andam, Enter escolhe,

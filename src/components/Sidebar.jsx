@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import {
   LayoutGrid, ArrowRightLeft, History,
-  ShoppingCart, Settings, Box, LogOut, ClipboardList, FileText,
+  ShoppingCart, Settings, Box, LogOut, ClipboardList, FileText, SlidersHorizontal,
 } from 'lucide-react';
 import { useAuth } from '../contexts/auth';
 
@@ -16,6 +16,10 @@ function Sidebar() {
     { name: 'Sugestão de Compra',path: '/compras',        icon: <ShoppingCart size={18} /> },
     { name: 'Relatório de Estoque',path: '/relatorio-estoque', icon: <FileText size={18} /> },
     { name: 'Cadastros',         path: '/cadastros',      icon: <ClipboardList size={18} /> },
+    /* Preferencias fica no menu por enquanto. Vai para o bloco do usuario, no
+       pe da barra, quando aquele bloco virar menu — ver REQUISICOES_PLANO.md.
+       Nao entra em adminItems: e ajuste de cada usuario, nao de admin. */
+    { name: 'Preferências',      path: '/preferencias',   icon: <SlidersHorizontal size={18} /> },
   ];
 
   const adminItems = [

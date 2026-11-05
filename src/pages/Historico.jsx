@@ -116,7 +116,7 @@ export default function Historico() {
     let query = supabase
       .from('vw_auditoria_movimentacoes')
       .select(
-        'id, data, tipo, quantidade, unidade, motivo_descricao, produto, apresentacao, local, usuario',
+        'id, data, tipo, quantidade, unidade, motivo_descricao, produto, apresentacao, local, usuario, requisicao_id',
         { count: 'exact' }
       )
       .eq('local_id', localAtual.id)
@@ -189,7 +189,7 @@ export default function Historico() {
   };
 
   const totalPaginas = Math.ceil(total / PAGE_SIZE);
-  const totalColunas = isAdmin ? 9 : 8;
+  const totalColunas = isAdmin ? 10 : 9;
 
   return (
     <div className="flex flex-col gap-5">
@@ -310,6 +310,10 @@ export default function Historico() {
                 <th>Unidade</th>
                 <th>Motivo</th>
                 <th>Usuário</th>
+                {/* Coluna da requisição de origem. Vem da view, que a expõe
+                    desde a migracao 09 — o vinculo ja existia em
+                    movimentacoes.requisicao_item_id, faltava sair de la. */}
+                <th className="w-16">Req</th>
                 {isAdmin && <th className="text-right w-16">Ações</th>}
               </tr>
             </thead>
@@ -337,6 +341,11 @@ export default function Historico() {
                     <td className="text-[12px] text-app-text-secondary">{r.unidade}</td>
                     <td className="text-[12px]">{r.motivo_descricao ?? '—'}</td>
                     <td className="text-[12px] text-app-text-secondary">{r.usuario}</td>
+                    <td className="text-[12px] whitespace-nowrap">
+                      {r.requisicao_id
+                        ? <span className="font-semibold">#{r.requisicao_id}</span>
+                        : <span className="text-app-text-label">—</span>}
+                    </td>
                     {isAdmin && (
                       <td className="text-right">
                         <button
