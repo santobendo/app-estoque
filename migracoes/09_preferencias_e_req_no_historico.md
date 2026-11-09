@@ -92,7 +92,17 @@ begin;
 -- item com o local_id do próprio estoque da movimentação — os dois recortes
 -- são o mesmo local.
 -- -----------------------------------------------------------------
-create or replace view vw_auditoria_movimentacoes as
+-- O with (security_invoker = on) vai DENTRO do create, e não num alter view
+-- depois, porque create or replace view sem cláusula with substitui o conjunto
+-- de opções da view pelo conjunto vazio — "replace" é literal, é um
+-- AT_ReplaceRelOptions por dentro. A primeira versão desta migração confiava
+-- que a opção sobrevivia, e ela não sobrevive: a view ficou com reloptions
+-- NULL, isto é, rodando com a permissão do dono e ignorando o RLS por local.
+-- O grant, esse sim, sobrevive — ele mora em pg_class.relacl, que o replace
+-- não toca. Duas coisas diferentes que eu havia tratado como uma.
+create or replace view vw_auditoria_movimentacoes
+  with (security_invoker = on)
+as
 select
   m.id,
   m.data,
@@ -142,10 +152,32 @@ comment on view vw_auditoria_movimentacoes is
 commit;
 ```
 
-`create or replace` preserva o grant e a opção `security_invoker`, então **não** é preciso
-repetir `grant select` nem `alter view ... set (security_invoker = on)`. O teste 3 abaixo
-confere as duas coisas, porque "preservou" é promessa de documentação e já nos custou um
-42501.
+`create or replace` preserva o **grant** — ele mora em `pg_class.relacl`, que o replace não
+toca — então não é preciso repetir `grant select`. Já a opção `security_invoker` **não**
+sobrevive, e é por isso que ela está na cláusula `with` do próprio `create` acima.
+
+### Se você já rodou a Parte 2 antes desta correção
+
+A primeira versão desta migração não tinha o `with`, e deixou a view com `reloptions`
+NULL — rodando com a permissão do dono e **ignorando o RLS por local**. Conserta com uma
+linha, sem tocar em dado:
+
+```sql
+alter view vw_auditoria_movimentacoes set (security_invoker = on);
+```
+
+Confira depois com o teste 1: `opcoes_view` tem que voltar `{security_invoker=true}`. Se
+voltar NULL, a view está aberta e **qualquer usuário autenticado vê movimentação de
+todos os locais**.
+
+Para saber se foi só esta view:
+
+```sql
+select relname, reloptions::text from pg_class where relname like 'vw_%' order by relname;
+```
+
+As outras quatro não foram tocadas por esta migração e devem estar com
+`{security_invoker=true}`.
 
 ---
 
@@ -253,7 +285,9 @@ alter table perfis drop column    if exists preferencia_requisicao;
 -- o grant volta explícito no fim deste bloco.
 drop view if exists vw_auditoria_movimentacoes;
 
-create view vw_auditoria_movimentacoes as
+create view vw_auditoria_movimentacoes
+  with (security_invoker = on)
+as
 select
   m.id, m.data, m.tipo, m.quantidade,
   a.quantidade_unitaria,
@@ -283,8 +317,8 @@ left join papeis              pa on pa.id = pf.papel_id
 left join motivos_movimentacao mo on mo.id = m.motivo_id
 order by m.data desc;
 
-alter view vw_auditoria_movimentacoes set (security_invoker = on);
-
+-- O grant volta explícito porque o drop levou o original embora. O
+-- security_invoker já está na cláusula with do create acima.
 grant select on public.vw_auditoria_movimentacoes to authenticated;
 
 commit;

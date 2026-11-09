@@ -692,6 +692,16 @@ order by m.data desc;
 
 -- security_invoker: sem isto a view roda com a permissão do dono e
 -- ignora o RLS das tabelas-base, devolvendo todos os locais.
+--
+-- ATENÇÃO para quem escrever migração que mexa nesta view, ou em qualquer das
+-- outras quatro: `create or replace view` NÃO preserva esta opção. Ele
+-- substitui o conjunto de reloptions pelo conjunto que vier na cláusula
+-- `with`, e sem cláusula o conjunto é vazio — a view fica aberta, ignorando o
+-- RLS, calada. O grant, esse sim, sobrevive ao replace, porque mora em
+-- pg_class.relacl. Foi o que aconteceu na primeira versão da migração 09.
+-- Numa migração, escreva `create or replace view x with (security_invoker =
+-- on) as ...` e confira com:
+--   select reloptions from pg_class where relname = 'x';
 alter view vw_auditoria_movimentacoes set (security_invoker = on);
 
 comment on view vw_auditoria_movimentacoes is
