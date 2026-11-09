@@ -16,10 +16,6 @@ function Sidebar() {
     { name: 'Sugestão de Compra',path: '/compras',        icon: <ShoppingCart size={18} /> },
     { name: 'Relatório de Estoque',path: '/relatorio-estoque', icon: <FileText size={18} /> },
     { name: 'Cadastros',         path: '/cadastros',      icon: <ClipboardList size={18} /> },
-    /* Preferencias fica no menu por enquanto. Vai para o bloco do usuario, no
-       pe da barra, quando aquele bloco virar menu — ver REQUISICOES_PLANO.md.
-       Nao entra em adminItems: e ajuste de cada usuario, nao de admin. */
-    { name: 'Preferências',      path: '/preferencias',   icon: <SlidersHorizontal size={18} /> },
   ];
 
   const adminItems = [
@@ -86,16 +82,36 @@ function Sidebar() {
         )}
       </nav>
 
-      {/* User */}
+      {/* User
+          O bloco do usuario e o acesso as Preferencias, que saiu do menu
+          principal: preferencia e ajuste de quem esta logado, e o lugar onde se
+          procura isso e o proprio nome. Ficou NavLink, e nao bloco inteiro
+          clicavel com o botao de sair dentro, porque botao dentro de link e
+          HTML invalido e o clique viraria loteria — os dois sao irmaos.
+
+          O avatar ganhou fundo branco com borda: antes era bg-app-bg, que e a
+          mesma cor do estado ativo do link, e ele desapareceria no fundo
+          justamente quando a tela de Preferencias estivesse aberta. */}
       <div className="p-3 border-t border-app-border-inner">
-        <div className="flex items-center gap-2.5 px-2 py-1.5">
-          <div className="w-8 h-8 rounded-full bg-app-bg flex items-center justify-center font-bold text-app-text text-[12px] shrink-0">
-            {userInitial}
-          </div>
-          <div className="flex flex-col flex-1 overflow-hidden">
-            <span className="text-[12px] font-bold text-app-text truncate">{userName}</span>
-            <span className="text-[10px] text-app-text-secondary truncate">{userPapel}</span>
-          </div>
+        <div className="flex items-center gap-1">
+          <NavLink
+            to="/preferencias"
+            title="Preferências"
+            className={({ isActive }) =>
+              `flex items-center gap-2.5 px-2 py-1.5 rounded-lg flex-1 overflow-hidden transition-colors ${
+                isActive ? 'bg-app-bg' : 'hover:bg-app-bg/60'
+              }`
+            }
+          >
+            <div className="w-8 h-8 rounded-full bg-white border border-app-border flex items-center justify-center font-bold text-app-text text-[12px] shrink-0">
+              {userInitial}
+            </div>
+            <div className="flex flex-col flex-1 overflow-hidden">
+              <span className="text-[12px] font-bold text-app-text truncate">{userName}</span>
+              <span className="text-[10px] text-app-text-secondary truncate">{userPapel}</span>
+            </div>
+            <SlidersHorizontal size={14} className="text-app-text-label shrink-0" />
+          </NavLink>
           <button
             onClick={signOut}
             title="Sair"

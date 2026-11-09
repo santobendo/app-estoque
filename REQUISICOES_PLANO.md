@@ -259,8 +259,8 @@ somar a entrega, e o 4 a requisição cruzando locais.
   Por isso ela não é aba de Configurações — aquela tela é bloqueada para não-admin — e
   por isso o valor é coluna em `perfis` e não tabela: depende do id do usuário e de mais
   nada. Guarda só a opção de requisição; o modo escuro ficou de fora por decisão sua.
-  **Pendente:** ela está como item do menu lateral e vai para o bloco do usuário, no pé
-  da barra, quando aquele bloco virar menu.
+  Em 09/11/2026 saiu do menu lateral para o bloco do usuário, no pé da barra: o lugar
+  onde se procura ajuste de quem está logado é o próprio nome.
 - ~~**Requisição na tela de Histórico**~~ — feita em 04/11/2026, migração 09: coluna
   "Req" com `#12` ou travessão. A ligação já existia em
   `movimentacoes.requisicao_item_id`; o que faltava era a `vw_auditoria_movimentacoes`
@@ -269,9 +269,10 @@ somar a entrega, e o 4 a requisição cruzando locais.
   todos, ele não cabe em `perfis`: entra em tabela própria, de **uma linha com colunas
   tipadas** (`create table parametros (id boolean primary key default true check (id),
   ...)`), nunca chave/valor. As duas telas convivem; são coisas diferentes.
-- **Filtro por requisição no Histórico** — agora que a coluna aparece, filtrar por número
-  é o passo natural. Barato: a view já devolve `requisicao_id`, é um `.eq()` a mais e um
-  campo no bloco de filtros.
+- ~~**Filtro por requisição no Histórico**~~ — feito em 09/11/2026. Campo "Req" na barra
+  de filtros e um `.eq('requisicao_id', ...)`. O estado vazio ganhou texto próprio quando
+  o filtro está ativo: "nenhuma movimentação encontrada neste local" soaria como "esse
+  número não existe", e uma requisição cruza locais por desenho.
 - **Telas dedicadas de requisição** — criar o pedido antes da entrega, entrega parcial,
   data escolhida à mão (ver a coluna `data` na seção 1), edição da solicitada.
 - ~~**`Label`/`SectionHeader` duplicados** em `CadastroProduto.jsx` e

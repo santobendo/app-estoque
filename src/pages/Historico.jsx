@@ -65,6 +65,10 @@ export default function Historico() {
   const [filtroMotivo, setFiltroMotivo] = useState('');
   const [filtroInicio, setFiltroInicio] = useState('');
   const [filtroFim, setFiltroFim]       = useState('');
+  /* Número da requisição. Texto, e não type="number": o campo é um id, não uma
+     quantidade, então setinha de incrementar e vírgula decimal não fazem sentido.
+     Os dígitos são filtrados na entrada, o que dispensa validar na saída. */
+  const [filtroReq, setFiltroReq]       = useState('');
 
   /* Opções do filtro de motivo. Vêm da tabela, e não de um allowlist como na
      tela de Movimentações: aqui o objetivo é achar o que já foi gravado, o que
@@ -87,7 +91,7 @@ export default function Historico() {
      onde ele estava em vez de jogá-lo na primeira página. A exceção é o botão
      Limpar, que quer dizer recomeçar: lá a paginação é zerada à mão. */
   const chaveFiltros = [
-    filtroTipo, filtroMotivo, filtroInicio, filtroFim, busca, localAtual?.id,
+    filtroTipo, filtroMotivo, filtroInicio, filtroFim, filtroReq, busca, localAtual?.id,
   ].join('|');
   const [paginado, setPaginado] = useState({ chave: null, valor: 0 });
   const pagina = paginado.chave === chaveFiltros ? paginado.valor : 0;
@@ -130,6 +134,7 @@ export default function Historico() {
     else if (filtroMotivo)           query = query.eq('motivo', filtroMotivo);
     if (filtroInicio) query = query.gte('data', inicioDoDiaISO(filtroInicio));
     if (filtroFim)    query = query.lte('data', fimDoDiaISO(filtroFim));
+    if (filtroReq)    query = query.eq('requisicao_id', Number(filtroReq));
     /* O filtro bate na coluna "busca" da view, que já vem sem acento e em
        maiúsculas (produto + apresentação + usuário). Por isso o termo também
        é normalizado antes de sair daqui: as duas pontas têm que combinar.
@@ -252,6 +257,19 @@ export default function Historico() {
           </select>
         </div>
 
+        {/* Requisição */}
+        <div className="flex flex-col gap-1">
+          <label className="text-[10px] font-bold text-app-text-label uppercase tracking-widest">Req</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            value={filtroReq}
+            onChange={e => setFiltroReq(e.target.value.replace(/\D/g, ''))}
+            placeholder="nº"
+            className="input-base py-2 text-[12px] w-20"
+          />
+        </div>
+
         {/* Data início */}
         <div className="flex flex-col gap-1">
           <label className="text-[10px] font-bold text-app-text-label uppercase tracking-widest">De</label>
@@ -275,12 +293,12 @@ export default function Historico() {
         </div>
 
         {/* Limpar filtros */}
-        {(busca || filtroTipo || filtroMotivo || filtroInicio || filtroFim) && (
+        {(busca || filtroTipo || filtroMotivo || filtroInicio || filtroFim || filtroReq) && (
           <button
             className="btn btn-secondary text-[12px] py-2 self-end"
             onClick={() => {
               setBusca(''); setFiltroTipo(''); setFiltroMotivo('');
-              setFiltroInicio(''); setFiltroFim('');
+              setFiltroInicio(''); setFiltroFim(''); setFiltroReq('');
               esquecerPagina();
             }}
           >
@@ -327,7 +345,14 @@ export default function Historico() {
               ) : rows.length === 0 ? (
                 <tr>
                   <td colSpan={totalColunas} className="text-center py-10 text-app-text-secondary text-[13px]">
-                    Nenhuma movimentação encontrada neste local.
+                    {/* Com filtro de requisição a mensagem genérica mentiria por
+                        omissão: a requisição pode existir e ter itens só em
+                        outro local, e "nenhuma neste local" soaria como "esse
+                        número não existe". Uma requisição cruza locais por
+                        desenho, então a diferença importa. */}
+                    {filtroReq
+                      ? <>Nenhuma movimentação da requisição <span className="font-semibold">#{filtroReq}</span> em {localAtual?.nome ?? 'este local'}. Ela pode ter itens em outro local — troque o local na barra superior.</>
+                      : 'Nenhuma movimentação encontrada neste local.'}
                   </td>
                 </tr>
               ) : (
