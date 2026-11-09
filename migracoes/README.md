@@ -1,16 +1,24 @@
 # Migrações
 
-| Migração | Testes | Produção A | Produção B |
-|---|---|---|---|
-| `09_preferencias_e_req_no_historico.md` | — | — | — |
+**Agora são dois bancos:** testes e produção A. A produção B foi desativada em 11/2026
+por não estar mais em uso — as migrações 01 a 09 chegaram a ser aplicadas nela, mas ela
+não entra mais nesta tabela.
 
-Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os três estiverem
-em dia.
+| Migração | Testes | Produção A |
+|---|---|---|
+| `09_preferencias_e_req_no_historico.md` | ✓ 09/11/2026 | ✓ 09/11/2026 |
 
-As migrações 01 a 08 foram aplicadas nos três bancos — testes e as duas instâncias de
-produção — e o conteúdo delas já está consolidado no
-**`estoque_schema_normalizado.sql`**, na raiz do projeto. Por isso foram removidas da
-árvore de trabalho (veja como recuperá-las abaixo).
+Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os dois estiverem
+em dia — é o caso da 09, que já pode sair daqui.
+
+Atenção na 09: a primeira versão dela deixava a `vw_auditoria_movimentacoes` sem
+`security_invoker`, porque `create or replace view` não preserva essa opção. Está
+corrigido no arquivo, e o `estoque_schema_normalizado.sql` traz o aviso ao lado do
+`alter view` para a próxima migração que mexer em qualquer das cinco views.
+
+As migrações 01 a 08 já estão consolidadas no **`estoque_schema_normalizado.sql`**, na
+raiz do projeto, e por isso foram removidas da árvore de trabalho (veja como recuperá-las
+abaixo).
 
 ## Como criar um banco novo
 
