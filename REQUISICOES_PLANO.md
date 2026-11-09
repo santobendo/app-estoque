@@ -274,7 +274,9 @@ somar a entrega, e o 4 a requisição cruzando locais.
   o filtro está ativo: "nenhuma movimentação encontrada neste local" soaria como "esse
   número não existe", e uma requisição cruza locais por desenho.
 - **Telas dedicadas de requisição** — criar o pedido antes da entrega, entrega parcial,
-  data escolhida à mão (ver a coluna `data` na seção 1), edição da solicitada.
+  data escolhida à mão (ver a coluna `data` na seção 1), edição da solicitada. Plano
+  próprio em **`REQUISICOES_TELAS_PLANO.md`**, com as perguntas de desenho em aberto na
+  seção 3.
 - ~~**`Label`/`SectionHeader` duplicados** em `CadastroProduto.jsx` e
   `ProdutoDetalhe.jsx`~~ — feito em 15/10/2026, junto com a faxina de lint. As duas
   cópias já tinham divergido do original; ver `DIVIDA_TECNICA.md`.
