@@ -257,6 +257,29 @@ select count(*) as esperado_com_requisicao
 
 Os dois têm que bater.
 
+**Não compare com a contagem de `requisicao_itens`** — não tem motivo para ser igual, e
+ver os dois números diferentes assusta sem precisar. Um item vale por (requisição,
+apresentação, local), e a segunda saída do mesmo produto reaproveita o item em vez de
+criar outro: a entregue é soma. Então 5 movimentações sobre 4 itens significa que um item
+foi baixado duas vezes, e no Histórico as duas linhas vão mostrar o mesmo `#N`. Para ver
+qual é:
+
+```sql
+select ri.requisicao_id, ri.id as item_id, p.nome as produto, l.nome as local,
+       count(m.id) as movimentacoes, coalesce(sum(m.quantidade), 0) as entregue
+  from requisicao_itens ri
+  join apresentacoes a on a.id = ri.apresentacao_id
+  join produtos      p on p.id = a.produto_id
+  join locais        l on l.id = ri.local_id
+  left join movimentacoes m on m.requisicao_item_id = ri.id
+ group by ri.requisicao_id, ri.id, p.nome, l.nome
+ order by ri.requisicao_id, ri.id;
+```
+
+A soma da coluna `movimentacoes` tem que dar o mesmo `com_requisicao` do teste. Item com
+`movimentacoes = 0` também é normal: é o pedido que não foi entregue, ou cuja
+movimentação foi excluída.
+
 ### 4. Conferir pelo olho
 
 ```sql
