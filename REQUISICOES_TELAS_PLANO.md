@@ -73,6 +73,10 @@ pendente" e quem quiser tirar um pedido morto da frente exclui a requisição. F
 mas perde o histórico do que foi pedido e não atendido — que é informação que você
 mencionou querer guardar.
 
+**Decidido (10/11/2026):** derivar o estado e guardar a decisão. `fechada_em timestamptz`
+nula enquanto aberta; "parcial ou total" continua saindo das somas dos itens, e não entra
+coluna `status`.
+
 ### 3.2 Entregar mais do que o pedido: bloquear, avisar ou deixar?
 
 Hoje nada impede. Pediu 10, o operador entrega 12, e a tela mostra entregue 12 sobre
@@ -87,6 +91,36 @@ cortados do combobox.
 Se você quiser bloquear, não dá para ser check constraint: a entregue é soma de várias
 linhas, então o lugar é um `raise` dentro da RPC. É barato, só é uma decisão com
 consequência operacional.
+
+**Decidido (10/11/2026):** avisar e deixar passar. E mais um pedido do Matheus: um campo de
+observações, para anotar por que foi entregue mais do que o pedido — ou qualquer outra
+situação que mereça registro.
+
+**Onde a observação fica.** Recomendo uma coluna só, `requisicoes.observacoes text` nula,
+editada no cabeçalho da tela da requisição e sinalizada na lista quando tem conteúdo. Os
+outros dois lugares possíveis custam mais do que entregam agora:
+
+- Em `requisicao_itens`, uma nota por linha é mais precisa, mas o excedente nasce na
+  *entrega*, não na linha: duas entregas do mesmo item, uma delas com sobra, disputariam o
+  mesmo campo, e a segunda apagaria ou emendaria a nota da primeira.
+- Em `movimentacoes` seria exato — uma nota por entrega — mas pede parâmetro novo na RPC,
+  campo novo no formulário de Movimentações e coluna nova na tabela mais movimentada do
+  banco. Caro para a primeira versão.
+
+Com a coluna no cabeçalho a RPC não muda nada, e quem lê "12 de 10" em âmbar na tela da
+requisição tem o porquê a dois centímetros do número — o aviso de excedente leva o foco
+para o campo de observações. Se o uso mostrar que a nota precisa ser por linha,
+`requisicao_itens.observacoes` entra depois, aditiva como esta.
+
+**Consequência que o campo traz, e que eu não tinha previsto.** Editar o cabeçalho passa a
+ser necessário para usuário comum, e hoje **não existe policy de `update` em `requisicoes`
+para não-admin** — de propósito: dar `update` ali deixaria qualquer um trocar os
+responsáveis de qualquer requisição. É o que diz o comentário de `fn_toca_requisicao`, que
+por isso é `security definer`. Então a migração 10 precisa de duas coisas além do que eu
+havia listado: um predicado para quem edita o cabeçalho, e o trigger de proteção cobrindo
+também `requisicoes`, barrando `digitado_por` e `entregue_por` para não-admin. Predicado
+que eu recomendo: existe item desta requisição em local que o usuário pode editar — é o
+mesmo recorte que ele já vê, e não inventa dono para uma requisição que cruza locais.
 
 ### 3.3 Entregar um item que não está no pedido
 
@@ -110,6 +144,34 @@ viola, então a migração não precisa tocar em dado.
 simples no banco, mas empurra o operador para o fluxo de Movimentações para resolver, e
 duas portas com regras diferentes para a mesma coisa é o tipo de armadilha que a gente
 paga depois.
+
+**Exemplo, pedido pelo Matheus em 10/11/2026.** O caso não só acontece: no fluxo (a) da
+3.7, que é o que vamos fazer, ele é o caminho *normal* da tela. A razão é que o combobox de
+produto de Movimentações é livre — vincular a tela a uma requisição não limita a lista aos
+itens do pedido. Três formas, da mais óbvia para a mais traiçoeira:
+
+**1. O item que pedem no balcão.** A requisição #42 foi montada com Arroz 5kg — 10 e Óleo
+900ml — 6. O estoquista entrega os dois em Movimentações, vinculado ao #42. Na hora, o
+cozinheiro diz "leva 2 de sal também". O estoquista escolhe Sal 1kg na mesma tela, ainda no
+#42, quantidade 2. A chave `(42, sal 1kg, Cozinha)` não existe, a RPC cria o item, e
+`quantidade_solicitada` recebe o que o operador digitou no campo "quanto foi solicitado" —
+2. Amanhã o gerente abre a #42 e lê "Sal 1kg — solicitado 2, entregue 2". Uma linha que
+ninguém pôs no pedido, hoje indistinguível das que ele mesmo digitou.
+
+**2. O erro de apresentação.** O pedido tem Arroz 5kg; o operador clica em Arroz 1kg.
+Produto certo, apresentação errada, chave diferente — item novo. A #42 passa a mostrar
+*duas* linhas de arroz: a de 5kg com solicitado 10 e entregue 0, e a de 1kg com solicitado
+10 e entregue 10. Parece um pedido com duas linhas de arroz, uma delas não atendida. E não
+há como dizer, olhando, que a segunda nunca foi pedida.
+
+**3. O local.** `local_id` está na chave única, então entregar o mesmo produto a partir de
+um local diferente do da linha do pedido também cria item novo. A linha da Cozinha fica em
+entregue 0 e aparece uma linha do Depósito como se tivesse sido pedida.
+
+Nos três o estrago é o mesmo, e é de leitura, não de saldo: o pedido original fica
+reescrito por uma entrega, e ninguém consegue mais responder "isso foi pedido?". Com
+`quantidade_solicitada` nula o banco passa a saber a diferença, e a tela mostra duas
+seções — os itens do pedido e, abaixo, os entregues sem constar no pedido.
 
 ### 3.4 Quem pode editar o pedido
 
@@ -141,6 +203,22 @@ quantidade? Excluir perde o registro de que foi pedido. Eu zeraria — mas isso 
 a `check (quantidade_solicitada > 0)`, então na prática "zerar" é excluir mesmo, a menos
 que a 3.3 libere o nulo.
 
+**Decidido (10/11/2026):** o trigger, como recomendado. E a decisão separada se resolve
+sozinha, se a 3.3 liberar o nulo:
+
+- **Item sem nenhuma entrega:** excluir, e sem cerimônia. É a linha que o gerente digitou
+  errado e tirou antes de alguém entregar; não há movimentação para perder vínculo, e o
+  único registro que se perde é o do erro de digitação.
+- **Item com entrega:** **não excluir.** `movimentacoes.requisicao_item_id` é `on delete
+  set null`, então excluir o item **apaga em silêncio o vínculo da entrega com a
+  requisição** — a coluna "Req" do Histórico, que acabou de entrar, ficaria em travessão
+  para aquela saída. É a classe de perda calada que a gente vem evitando. Aqui "tirar do
+  pedido" é `quantidade_solicitada = null`: o item vira extra, e a frase que o banco passa
+  a contar é literalmente verdadeira — não foi pedido, mas foi entregue.
+
+Uma regra só, "remover do pedido", que apaga a linha quando não há entrega e a transforma
+em extra quando há.
+
 ### 3.5 A coluna `data` e o que ordena as listas
 
 `criado_em` é auditoria e não deve ser reescrito — está no comentário da tabela. Então a
@@ -157,6 +235,9 @@ foi mexido por último.
 movimentações três horas adiantadas, e o campo novo é da mesma espécie — um
 `datetime-local` que lê o valor como local.
 
+**Decidido (10/11/2026):** como recomendado — coluna `data` própria, listas por `data
+desc`, e o campo usando `src/lib/datas.js`.
+
 ### 3.6 Pedido que cruza locais: quem monta?
 
 Uma requisição cruza locais por desenho, mas `insert` em `requisicao_itens` exige
@@ -170,6 +251,11 @@ mudar isso é mudar o modelo de acesso, não a tela.
 
 Se você quiser que um gerente monte o pedido inteiro, inclusive de local alheio, é uma
 decisão de modelo de acesso e precisa de conversa própria — não é ajuste de tela.
+
+**Decidido (10/11/2026):** mantém-se o RLS. Palavra do Matheus: "um gerente só pode
+adicionar itens de um local que ele gerencia, é assim que deve ser." A tela mostra só os
+locais que o usuário pode editar e explica em texto que itens de outro local são
+adicionados por quem os gerencia.
 
 ### 3.7 Onde a entrega acontece
 
@@ -187,6 +273,53 @@ verdade. Mas duplica a validação de saldo, e divergência de validação é pi
 divergência de visual: uma deixa gravar o que a outra barra.
 
 Um meio: (a) agora, e (b) depois, como "entrega em lote", se o uso mostrar que vale.
+
+**Decidido (10/11/2026): (a) primeiro, nesta branch; (b) depois, em branch dedicada.** O
+Matheus pediu honestidade sobre o custo de (b), e a primeira coisa honesta é uma correção
+do que eu escrevi acima.
+
+**O que eu exagerei.** Escrevi que (b) "duplica a validação de saldo" e que divergência de
+validação "deixa gravar o que a outra barra". Fui conferir: `estoques` tem `check
+(quantidade_atual >= 0)` e o trigger `fn_atualiza_estoque` subtrai no insert — então saída
+maior que o saldo é **recusada pelo banco**, por qualquer caminho, inclusive chamada direta
+à API. A validação de Movimentações (`Estoque insuficiente. Disponível: X`) é mensagem
+amigável antes do envio, não é a autoridade. Logo (b) não consegue deixar passar o que (a)
+barra: o que pode divergir é o texto do aviso e o momento em que ele aparece — divergência
+de UX, não de dado. Isso baixa o risco de (b) de "perigoso" para "chato se esquecido".
+
+**O que (b) realmente custa.** Escopado como *entrega em lote dos itens que já estão no
+pedido* — e não como uma segunda tela de movimentação —, (b) **não precisa** do combobox de
+produto, nem dos cartões de tipo, nem do modo ajuste, nem do bloco de responsáveis. Sobra
+uma tabela com um campo de quantidade por linha. O custo real está em três pontos:
+
+1. **Erro por linha.** O `erros` de Movimentações é um objeto achatado (`{quantidade:
+   '...'}`) porque a tela grava uma movimentação por vez. Em lote o estado de erro passa a
+   ser indexado por item, e cada campo que hoje recebe `erros.quantidade` passa a receber
+   `erros[item.id]`. É o trabalho mais entediante dos três e o que mais convida a gambiarra
+   se feito com pressa.
+2. **Transação.** N chamadas à RPC são N transações: se a linha 7 falhar por saldo, as seis
+   primeiras já estão gravadas e a tela tem que dizer exatamente quais foram e quais não. O
+   alternativo é uma RPC de lote — `fn_registra_entrega_lote(p_itens jsonb, ...)` — que
+   chama a de hoje num laço e é tudo ou nada: umas 30 linhas de PL/pgSQL, e deixa a tela
+   muito mais simples ao custo de mais uma função no banco.
+3. **`estoque_id` e saldo por linha.** O item do pedido sabe apresentação e local; a
+   entrega precisa do `estoques.id` e do saldo de cada um. É uma consulta só, barata, mas é
+   código que (a) não tem.
+
+**Por que (a) primeiro, e não só por cautela.** (a) é necessário de qualquer forma: item
+fora do pedido (3.3), saída solta sem requisição, ajuste e entrada moram em Movimentações e
+continuam morando lá. O "entregar" da tela da requisição, em (a), é um botão que abre
+Movimentações já vinculada ao número — uma rota e um parâmetro. Então (a) não é degrau que
+se joga fora depois, é a porta que fica. E fazer (a) primeiro dá uma informação que hoje
+ninguém tem: quantos itens um pedido real costuma ter. (b) paga a si mesmo num pedido de 15
+linhas e é peso morto num de 2.
+
+**O risco de manutenção de (b), sem rodeio:** o que pode envelhecer mal é a entrega existir
+em dois lugares *com a regra de negócio em dois lugares* — por exemplo no dia em que entrar
+"saída de descarte exige motivo". Essa regra teria que ser lembrada nas duas telas, e
+esquecer uma é silencioso. A defesa é pôr a regra na RPC, que as duas chamam, e não na tela
+— e é por isso que a RPC de lote do ponto 2 é a melhor forma de fazer (b): uma porta no
+banco, duas telas magras em cima.
 
 ---
 
@@ -226,13 +359,18 @@ Conteúdo, se as recomendações forem aceitas:
    de só admin
 5. `tg_protege_requisicao_item`, barrando `requisicao_id`, `apresentacao_id` e `local_id`
    para não-admin
-6. `vw_requisicoes` ganha `data`, `fechada_em` e as somas de solicitada e entregue —
+6. `vw_requisicoes` ganha `data`, `fechada_em`, `observacoes` e as somas de
+   solicitada e entregue —
    **com `with (security_invoker = on)` dentro do `create or replace`**, pela lição da 09
 7. Aviso sobre a sequence: os testes em `begin/rollback` queimam número de requisição, só
    no banco de testes
+8. `requisicoes.observacoes text` nula (3.2), e a view mostrando-a
+9. Policy de `update` em `requisicoes` para não-admin pelo predicado "tem item em local que
+   eu posso editar", e o `tg_protege_requisicao` barrando `digitado_por` e `entregue_por` —
+   vai junto com o 4 e o 5, no mesmo commit, pelo mesmo motivo
 
-Itens 1 e 2 são aditivos puros. O item 3 é o único que mexe em constraint existente. O 4 e
-o 5 andam juntos e não devem ser separados em dois commits — policy relaxada sem o trigger
+Itens 1, 2 e 8 são aditivos puros. O item 3 é o único que mexe em constraint existente. O 4, o 5
+e o 9 andam juntos e não devem ser separados em commits diferentes — policy relaxada sem o trigger
 é uma janela aberta.
 
 ---
@@ -246,5 +384,6 @@ o 5 andam juntos e não devem ser separados em dois commits — policy relaxada 
 4. Tela da requisição, sem o encerrar
 5. Encerrar, extras e o vínculo com Movimentações
 6. Teste, e aí produção
+7. Depois, em branch dedicada: entrega em lote (3.7b), com a RPC de lote
 
 Os passos 3 a 5 são commits separados na mesma branch, cada um com a tela funcionando.
