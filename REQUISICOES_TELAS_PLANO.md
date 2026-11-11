@@ -43,7 +43,7 @@ uma depende de uma resposta sua na seção 3.
 | 1 | Coluna `data` em `requisicoes` — data do pedido escolhida à mão | Pergunta 3.5 |
 | 2 | Encerrar um pedido com item não entregue | Pergunta 3.1 |
 | 3 | Gerente editar e excluir item do próprio pedido | Pergunta 3.4 |
-| 4 | Distinguir item pedido de item entregue por fora | Pergunta 3.3 |
+| 4 | ~~Distinguir item pedido de item entregue por fora~~ — descartado na 3.3 | — |
 
 Nenhuma dessas mexe em dado existente, e nenhuma mexe em saldo.
 
@@ -173,6 +173,32 @@ reescrito por uma entrega, e ninguém consegue mais responder "isso foi pedido?"
 `quantidade_solicitada` nula o banco passa a saber a diferença, e a tela mostra duas
 seções — os itens do pedido e, abaixo, os entregues sem constar no pedido.
 
+**Decidido (11/11/2026): não fazer.** `quantidade_solicitada` continua `not null`, e a
+migração 10 saiu sem este item. A leitura do Matheus, caso por caso:
+
+- **Caso 1, o item do balcão:** "tranquilo, isso é perfeito e também seria possível fazer
+  se tivesse a baixa na tela de requisições. É prático, seguimos assim."
+- **Caso 2, o erro de apresentação:** "é algo chato, mas no final é visto que foi entregue;
+  o gerente ou adm pode excluir depois para ficar limpo."
+- **Caso 3, o local:** "esse comportamento é bom, pois permite ver que o produto foi pedido
+  em um local e talvez por falta foi retirado de outro."
+
+Duas consequências para as telas, e vale escrever para ninguém esperar o contrário:
+
+1. **Não existe seção de extras.** Todos os itens aparecem numa lista só, porque o banco
+   não sabe separá-los.
+2. **A limpeza do caso 2 é excluir a linha que NÃO tem entrega** — a do Arroz 5kg, que
+   ficou em entregue 0. Essa exclusão não perde nada: nenhuma movimentação aponta para ela.
+   Sobra a linha de Arroz 1kg com solicitado 10 e entregue 10, que é o que de fato
+   aconteceu. Excluir a linha *entregue* é o contrário disso, e é o que o trigger da 3.4
+   barra para não-admin.
+
+Se um dia a distinção virar necessária, há um caminho que custa zero no schema: um item
+criado pela entrega tem `criado_em` **exatamente igual** ao da sua primeira movimentação,
+porque os dois nascem na mesma transação e o `now()` do Postgres é o instante da transação.
+Um item criado pela tela de pedido nasce antes, em outra transação. Dá para derivar o
+marcador na view, sem coluna nova e sem mexer em constraint.
+
 ### 3.4 Quem pode editar o pedido
 
 Hoje `update` e `delete` em `requisicao_itens` e em `requisicoes` são **só de admin**. A
@@ -212,12 +238,21 @@ sozinha, se a 3.3 liberar o nulo:
 - **Item com entrega:** **não excluir.** `movimentacoes.requisicao_item_id` é `on delete
   set null`, então excluir o item **apaga em silêncio o vínculo da entrega com a
   requisição** — a coluna "Req" do Histórico, que acabou de entrar, ficaria em travessão
-  para aquela saída. É a classe de perda calada que a gente vem evitando. Aqui "tirar do
-  pedido" é `quantidade_solicitada = null`: o item vira extra, e a frase que o banco passa
-  a contar é literalmente verdadeira — não foi pedido, mas foi entregue.
+  para aquela saída. É a classe de perda calada que a gente vem evitando.
 
-Uma regra só, "remover do pedido", que apaga a linha quando não há entrega e a transforma
-em extra quando há.
+**Ajuste depois da resposta da 3.3 (11/11/2026).** Sem o nulo, não existe "tirar do pedido
+sem excluir": o segundo caso deixa de ter saída elegante e passa a ser uma proibição. Ficou
+assim na migração 10, dentro do `tg_protege_requisicao_item`:
+
+- **não-admin** não exclui item que já tem entrega — a mensagem diz quantas entregas são e
+  aponta o caminho sem perda, que é excluir a movimentação no Histórico primeiro (o
+  `fn_reverte_estoque` devolve o saldo) e só então o item, que aí não tem mais entrega;
+- **admin** exclui, porque é a válvula de escape de quem administra, e a tela avisa com o
+  número de entregas antes de deixar.
+
+O trigger dispara **também no cascade** de `requisicoes`, então um gerente não consegue
+apagar a própria requisição se algo nela já foi entregue — que é o resultado certo: o
+cascade apagaria todos aqueles vínculos de uma vez.
 
 ### 3.5 A coluna `data` e o que ordena as listas
 
@@ -330,9 +365,10 @@ e uma coluna de progresso ("8 de 10"). Filtro por aberta/encerrada e por número
 "nova requisição".
 
 **Tela da requisição** (`/requisicoes/:id`) — cabeçalho com número, data editável,
-responsáveis; lista de itens com solicitada, entregue e saldo a entregar; os extras
-separados; botões "adicionar item", "entregar" (leva para Movimentações vinculada) e
-"encerrar".
+responsáveis e o campo de observações; lista única de itens com solicitada, entregue e
+saldo a entregar — sem seção de extras, pela 3.3; botões "adicionar item", "entregar" (leva
+para Movimentações vinculada) e "encerrar". Excluir item que já tem entrega só aparece para
+admin, e com aviso.
 
 **Movimentações** — ganha a terceira opção de requisição funcionando de verdade. Hoje
 "Requisição existente" abre o modal e lista as requisições; passa a aceitar também chegar
@@ -353,12 +389,12 @@ Conteúdo, se as recomendações forem aceitas:
 1. `requisicoes.data timestamptz not null default now()` + comentário distinguindo de
    `criado_em`
 2. `requisicoes.fechada_em timestamptz` nula
-3. `requisicao_itens.quantidade_solicitada` passa a aceitar nulo, e o check vira
-   `is null or > 0`
+3. ~~`requisicao_itens.quantidade_solicitada` passa a aceitar nulo~~ — **descartado**
+   na resposta da 3.3; não entrou na migração 10
 4. Policies de `update`/`delete` em `requisicoes` e `requisicao_itens` por local, em vez
    de só admin
 5. `tg_protege_requisicao_item`, barrando `requisicao_id`, `apresentacao_id` e `local_id`
-   para não-admin
+   para não-admin, e barrando a exclusão de item que já tem entrega
 6. `vw_requisicoes` ganha `data`, `fechada_em`, `observacoes` e as somas de
    solicitada e entregue —
    **com `with (security_invoker = on)` dentro do `create or replace`**, pela lição da 09
@@ -369,16 +405,23 @@ Conteúdo, se as recomendações forem aceitas:
    eu posso editar", e o `tg_protege_requisicao` barrando `digitado_por` e `entregue_por` —
    vai junto com o 4 e o 5, no mesmo commit, pelo mesmo motivo
 
-Itens 1, 2 e 8 são aditivos puros. O item 3 é o único que mexe em constraint existente. O 4, o 5
-e o 9 andam juntos e não devem ser separados em commits diferentes — policy relaxada sem o trigger
-é uma janela aberta.
+Itens 1, 2 e 8 são aditivos puros, e com o 3 descartado **nenhuma constraint existente é
+alterada**. O 4, o 5 e o 9 andam juntos e não devem ser separados em commits diferentes —
+policy relaxada sem o trigger é uma janela aberta; na migração escrita eles estão no mesmo
+`begin/commit`, com os triggers antes das policies, então a janela não existe em instante
+nenhum.
+
+Entrou também, fora da lista original: **a RPC passa a datar o cabeçalho pela data da
+movimentação que o criou** (`coalesce(p_data, now())`). Sem isso a coluna `data` mentiria no
+caminho que cria quase toda requisição do sistema.
 
 ---
 
 ## 6. Ordem que eu sugiro
 
-1. Você responde a seção 3
-2. Migração 10, com os testes, e você roda no banco de testes
+1. ~~Você responde a seção 3~~ — feito em 10 e 11/11/2026
+2. ~~Migração 10, com os testes~~ — escrita em `migracoes/10_telas_requisicao.md`; falta
+   você rodar no banco de testes
 3. Lista de requisições (a tela mais simples, e já dá valor sozinha: hoje não há onde ver
    as requisições fora do modal)
 4. Tela da requisição, sem o encerrar

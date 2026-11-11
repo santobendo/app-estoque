@@ -283,6 +283,9 @@ create table requisicoes (
   id            serial      primary key,
   digitado_por  uuid        not null,
   entregue_por  uuid        not null,
+  data          timestamptz not null default now(),
+  fechada_em    timestamptz,
+  observacoes   text,
   criado_em     timestamptz not null default now(),
   atualizado_em timestamptz not null default now(),
 
@@ -293,16 +296,27 @@ create table requisicoes (
     foreign key (entregue_por) references perfis(id) on delete restrict
 );
 
--- Não existe coluna "data": criado_em já é a data de criação. Guardar as
--- duas seria manter duas verdades para a mesma coisa, e elas divergem no dia
--- em que alguém editar uma e não a outra. Quando a tela dedicada precisar de
--- data escolhida à mão, aí sim entra uma coluna própria — o criado_em é
--- auditoria e não deve ser reescrito.
+-- data x criado_em: são coisas diferentes, e a migração 10 separou as duas
+-- quando a tela dedicada passou a deixar escolher a data do pedido. criado_em
+-- é auditoria e não se reescreve; data é o instante do evento real, do mesmo
+-- jeito que movimentacoes.data já era. Nos bancos migrados estas três colunas
+-- ficaram no fim da tabela, e aqui aparecem antes de criado_em — a ordem
+-- física não é lida por ninguém (views e PostgREST usam nome), então a
+-- diferença é cosmética.
+--
+-- fechada_em existe porque "pedi 10, só tinha 8, está encerrada assim" não sai
+-- de nenhuma soma: é decisão de alguém, informação nova. O resto do estado
+-- continua derivado — não há coluna de status, e "parcial ou total" vem das
+-- somas dos itens, que se corrigem sozinhas quando uma movimentação é
+-- excluída.
 comment on table  requisicoes               is 'Cabeçalho da requisição. O id é o número exibido ao usuário. Uma requisição pode ter itens de locais diferentes.';
 comment on column requisicoes.digitado_por  is 'Quem digitou o pedido. Só admin pode indicar outra pessoa.';
 comment on column requisicoes.entregue_por  is 'Quem entregou os itens. Só admin pode indicar outra pessoa.';
-comment on column requisicoes.criado_em     is 'Data de criação da requisição — é a data da requisição, não existe coluna separada para isso.';
-comment on column requisicoes.atualizado_em is 'Atualizada por trigger a cada item ou entrega. Ordena o modal de requisições existentes.';
+comment on column requisicoes.data          is 'Data/hora do evento real do pedido, escolhida na tela. Pode diferir de criado_em. Ordena a lista de requisições.';
+comment on column requisicoes.fechada_em    is 'Quando a requisição foi encerrada à mão. Nula = aberta. Encerrar é decisão, não soma: serve para o pedido que não será mais atendido sair da lista de pendências.';
+comment on column requisicoes.observacoes   is 'Nota livre do pedido — por que foi entregue mais do que o solicitado, ou qualquer outra situação. É do cabeçalho, não da linha: o excedente nasce na entrega, e duas entregas do mesmo item disputariam um campo por linha.';
+comment on column requisicoes.criado_em     is 'Auditoria: quando a linha foi criada. A data do pedido é a coluna data, que pode ser escolhida à mão.';
+comment on column requisicoes.atualizado_em is 'Atualizada por trigger a cada item ou entrega, e pelo tg_protege_requisicao em qualquer update do cabeçalho. Ordena o modal de requisições existentes.';
 
 -- O item aponta para apresentação + local, não para a movimentação, porque a
 -- tela dedicada vai criar o item ANTES de existir qualquer entrega: pedir 10
@@ -530,6 +544,113 @@ comment on function fn_toca_requisicao() is
   'Atualiza requisicoes.atualizado_em quando entra um item ou uma entrega. Security definer porque usuário comum não tem UPDATE em requisicoes.';
 
 -- -------------------------------------------------------------
+-- 11.3 TRIGGERS — protegem colunas da requisição e dos itens
+--      A partir da migração 10 o gerente edita o próprio pedido, e as
+--      policies de update/delete deixaram de ser só de admin. Mas RLS é
+--      por LINHA, não por coluna: liberar update nos itens liberaria
+--      junto a troca de local_id, isto é, mover um item para um local
+--      que o usuário não gerencia.
+--
+--      A forma escolhida é a mesma do tg_protege_perfil — lista de
+--      negação por nome de coluna — e não uma função security definer
+--      por operação, como o fn_define_estoque_minimo. O motivo: a tela
+--      precisa de update E delete, e amanhã de edição em lote; uma
+--      função por operação não escala, e cada função nova é mais uma
+--      superfície para esquecer uma checagem. O trigger vale para
+--      qualquer caminho, inclusive chamada direta à API.
+-- -------------------------------------------------------------
+create or replace function fn_protege_requisicao()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  -- auth.uid() nulo é SQL Editor ou service role — contexto administrativo,
+  -- igual ao fn_protege_perfil.
+  if auth.uid() is not null and not fn_is_admin() then
+    if NEW.digitado_por is distinct from OLD.digitado_por then
+      raise exception 'Apenas administradores podem trocar quem digitou a requisição.'
+        using errcode = '42501';
+    end if;
+    if NEW.entregue_por is distinct from OLD.entregue_por then
+      raise exception 'Apenas administradores podem trocar quem entregou a requisição.'
+        using errcode = '42501';
+    end if;
+    if NEW.criado_em is distinct from OLD.criado_em then
+      raise exception 'criado_em é auditoria e não pode ser alterado.'
+        using errcode = '42501';
+    end if;
+  end if;
+  NEW.atualizado_em := now();
+  return NEW;
+end;
+$$;
+
+create trigger tg_protege_requisicao
+before update on requisicoes
+for each row execute function fn_protege_requisicao();
+
+comment on function fn_protege_requisicao() is
+  'Impede que não-admin troque os responsáveis ou o criado_em da requisição, e mantém atualizado_em. Espelha o fn_protege_perfil.';
+
+create or replace function fn_protege_requisicao_item()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_entregas int;
+begin
+  if tg_op = 'DELETE' then
+    -- movimentacoes.requisicao_item_id é on delete set null, de propósito:
+    -- apagar um item não apaga histórico de estoque. O efeito colateral é que
+    -- o vínculo da entrega com a requisição desaparece calado — a coluna Req
+    -- do Histórico volta a travessão. Para não-admin isso fica barrado; a
+    -- limpeza certa é excluir a movimentação no Histórico primeiro, que
+    -- devolve o saldo pelo fn_reverte_estoque, e só então o item.
+    if auth.uid() is not null and not fn_is_admin() then
+      select count(*) into v_entregas
+        from movimentacoes where requisicao_item_id = OLD.id;
+
+      if v_entregas > 0 then
+        raise exception
+          'Este item já tem % entrega(s) registrada(s). Excluí-lo faria essas movimentações perderem o vínculo com a requisição. Exclua a movimentação no Histórico primeiro, ou peça a um administrador.',
+          v_entregas
+          using errcode = '42501';
+      end if;
+    end if;
+    return OLD;
+  end if;
+
+  if auth.uid() is not null and not fn_is_admin() then
+    if NEW.requisicao_id is distinct from OLD.requisicao_id then
+      raise exception 'Apenas administradores podem mover um item para outra requisição.'
+        using errcode = '42501';
+    end if;
+    if NEW.apresentacao_id is distinct from OLD.apresentacao_id then
+      raise exception 'Apenas administradores podem trocar o produto de um item. Exclua a linha e inclua a correta.'
+        using errcode = '42501';
+    end if;
+    if NEW.local_id is distinct from OLD.local_id then
+      raise exception 'Apenas administradores podem trocar o local de um item.'
+        using errcode = '42501';
+    end if;
+  end if;
+
+  return NEW;
+end;
+$$;
+
+create trigger tg_protege_requisicao_item
+before update or delete on requisicao_itens
+for each row execute function fn_protege_requisicao_item();
+
+comment on function fn_protege_requisicao_item() is
+  'Impede que não-admin troque requisicao_id, apresentacao_id ou local_id de um item, e que exclua item que já tem entrega — o delete apagaria em silêncio o vínculo da movimentação com a requisição.';
+
+-- -------------------------------------------------------------
 -- 12. VIEW — consumo por produto nos últimos 30 dias
 --     Ajustada para usar motivo_id em vez de texto livre.
 --     Os códigos 'descarte' e 'ajuste' são filtrados via join na
@@ -728,16 +849,40 @@ select
     where i.requisicao_id = r.id)                        as itens,
   (select coalesce(sum(i.quantidade_solicitada), 0)
      from requisicao_itens i
-    where i.requisicao_id = r.id)                        as total_solicitado
+    where i.requisicao_id = r.id)                        as total_solicitado,
+  -- Daqui para baixo, colunas da migração 10. Ficam no FIM porque
+  -- create or replace view só acrescenta no fim: nos bancos migrados a ordem
+  -- é esta, e repeti-la aqui mantém banco novo e banco migrado idênticos.
+  r.data,
+  r.fechada_em,
+  r.observacoes,
+  (select coalesce(sum(m.quantidade), 0)
+     from requisicao_itens i
+     join movimentacoes    m on m.requisicao_item_id = i.id
+    where i.requisicao_id = r.id)                        as total_entregue,
+  -- Itens que ainda devem algo. É o que separa aberta de concluída sem
+  -- guardar status: pendente é entregue < solicitada, e o número se corrige
+  -- sozinho quando uma movimentação é excluída. A lista de requisições filtra
+  -- aberta com fechada_em is null and itens_pendentes > 0.
+  (select count(*)
+     from requisicao_itens i
+    where i.requisicao_id = r.id
+      and i.quantidade_solicitada > coalesce(
+            (select sum(m.quantidade)
+               from movimentacoes m
+              where m.requisicao_item_id = i.id), 0))     as itens_pendentes
 from requisicoes r
 left join perfis pd on pd.id = r.digitado_por
 left join perfis pe on pe.id = r.entregue_por
 order by r.atualizado_em desc;
 
+-- A ordenação continua por atualizado_em, e não pela coluna data nova, porque
+-- é dela que o modal de "requisição existente" depende — ele mostra o que foi
+-- mexido por último. A lista de requisições pede data desc na própria consulta.
 alter view vw_requisicoes set (security_invoker = on);
 
 comment on view vw_requisicoes is
-  'Cabeçalho das requisições com nomes dos responsáveis e contagem de itens visíveis ao usuário. Ordenada por última alteração, para o modal de requisição existente.';
+  'Cabeçalho das requisições com responsáveis, data, encerramento, observação e os totais solicitado e entregue. As somas e a contagem de itens respeitam o RLS por local, então o gerente vê os totais da parte que é dele. Ordenada por última alteração, para o modal de requisição existente.';
 
 -- -------------------------------------------------------------
 -- 14.2 VIEW — itens de requisição
@@ -1117,13 +1262,49 @@ create policy "gestores podem inserir requisicoes"
     )
   );
 
-create policy "admin pode atualizar requisicoes"
+-- Editar o cabeçalho deixou de ser só de admin na migração 10, porque a tela
+-- dedicada precisa que o gerente escolha a data, escreva a observação e
+-- encerre o próprio pedido. O predicado tem três braços, e cada um existe por
+-- um caso: admin; quem digitou (que cobre o cabeçalho recém-criado, ainda sem
+-- item, onde o braço de baixo não teria em que se apoiar); e quem gerencia o
+-- local de algum item (que cobre a requisição cruzando locais, sem inventar
+-- dono para ela). As COLUNAS são protegidas pelo tg_protege_requisicao, não
+-- aqui — RLS é por linha.
+create policy "gestores podem atualizar requisicoes"
   on requisicoes for update to authenticated
-  using (fn_is_admin());
+  using (
+    fn_is_ativo() and (
+      fn_is_admin()
+      or digitado_por = auth.uid()
+      or exists (
+        select 1 from requisicao_itens i
+         where i.requisicao_id = requisicoes.id
+           and fn_pode_editar_local(i.local_id)
+      )
+    )
+  );
 
-create policy "admin pode deletar requisicoes"
+-- Excluir o cabeçalho é mais restrito que editá-lo, e por um motivo concreto:
+-- requisicao_itens tem on delete cascade, e CASCADE não passa por RLS. Sem o
+-- "not exists" abaixo, o gerente da Cozinha apagaria, junto com a requisição,
+-- os itens do Almoxarifado que ele nem pode ver. Então ele só exclui o que
+-- digitou e que não tem nada fora do alcance dele. Item já entregue continua
+-- barrado pelo tg_protege_requisicao_item, que dispara no cascade também.
+create policy "gestores podem deletar a propria requisicao"
   on requisicoes for delete to authenticated
-  using (fn_is_admin());
+  using (
+    fn_is_ativo() and (
+      fn_is_admin()
+      or (
+        digitado_por = auth.uid()
+        and not exists (
+          select 1 from requisicao_itens i
+           where i.requisicao_id = requisicoes.id
+             and not fn_pode_editar_local(i.local_id)
+        )
+      )
+    )
+  );
 
 -- Nos itens o recorte é por local, pela mesma cadeia de estoques e
 -- movimentacoes. O gerente da Cozinha vê os itens dela e não vê os do
@@ -1136,13 +1317,18 @@ create policy "gestores podem inserir itens de requisicao"
   on requisicao_itens for insert to authenticated
   with check (fn_pode_editar_local(local_id));
 
-create policy "admin pode atualizar itens de requisicao"
+-- Mesma régua do insert: quem gerencia o local do item mexe no item. O
+-- with check existe para o update não ser uma porta lateral para mover a linha
+-- para um local alheio — o trigger já barra a troca de local_id para
+-- não-admin, e o with check fecha o caso do admin também.
+create policy "gestores podem atualizar itens de requisicao"
   on requisicao_itens for update to authenticated
-  using (fn_is_admin());
+  using (fn_pode_editar_local(local_id))
+  with check (fn_pode_editar_local(local_id));
 
-create policy "admin pode deletar itens de requisicao"
+create policy "gestores podem deletar itens de requisicao"
   on requisicao_itens for delete to authenticated
-  using (fn_is_admin());
+  using (fn_pode_editar_local(local_id));
 
 -- -------------------------------------------------------------
 -- 18. TRIGGER — protege campos sensíveis do perfil
@@ -1468,8 +1654,12 @@ begin
       v_entregue := auth.uid();
     end if;
 
-    insert into requisicoes (digitado_por, entregue_por)
-    values (v_digitado, v_entregue)
+    -- A data do cabeçalho acompanha a da movimentação que o criou: lançar uma
+    -- saída de ontem cria uma requisição de ontem, não de hoje. Sem isto a
+    -- coluna data mentiria justamente no caminho que cria quase toda
+    -- requisição.
+    insert into requisicoes (digitado_por, entregue_por, data)
+    values (v_digitado, v_entregue, coalesce(p_data, now()))
     returning id into v_req_id;
   end if;
 

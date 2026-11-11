@@ -6,11 +6,17 @@ não entra mais nesta tabela.
 
 | Migração | Testes | Produção A |
 |---|---|---|
-| _(nenhuma pendente)_ | | |
+| `10_telas_requisicao.md` | | |
 
 Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os dois estiverem
-em dia — é o que acabou de acontecer com a 09, aplicada nos dois em 09/11/2026 e removida
-daqui.
+em dia — foi o que aconteceu com a 09, aplicada nos dois em 09/11/2026 e removida daqui.
+
+A **10** prepara as telas dedicadas de requisição: data, encerramento e observação no
+cabeçalho, `update`/`delete` por local em vez de só admin (com dois triggers de proteção
+por coluna), a `vw_requisicoes` com os totais, e a RPC datando o cabeçalho pela
+movimentação. Atenção a uma coisa: a Parte 1 **escreve em linha existente** — preenche
+`data` com o `criado_em` de cada requisição que já existe. É o único update em dado antigo,
+e sem ele as requisições velhas nasceriam datadas do dia em que a migração rodou.
 
 Fica valendo o aviso que ela deixou: `create or replace view` **não** preserva o
 `security_invoker`. O `estoque_schema_normalizado.sql` traz a explicação ao lado do
