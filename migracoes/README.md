@@ -6,17 +6,18 @@ não entra mais nesta tabela.
 
 | Migração | Testes | Produção A |
 |---|---|---|
-| `09_preferencias_e_req_no_historico.md` | ✓ 09/11/2026 | ✓ 09/11/2026 |
+| _(nenhuma pendente)_ | | |
 
 Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os dois estiverem
-em dia — é o caso da 09, que já pode sair daqui.
+em dia — é o que acabou de acontecer com a 09, aplicada nos dois em 09/11/2026 e removida
+daqui.
 
-Atenção na 09: a primeira versão dela deixava a `vw_auditoria_movimentacoes` sem
-`security_invoker`, porque `create or replace view` não preserva essa opção. Está
-corrigido no arquivo, e o `estoque_schema_normalizado.sql` traz o aviso ao lado do
-`alter view` para a próxima migração que mexer em qualquer das cinco views.
+Fica valendo o aviso que ela deixou: `create or replace view` **não** preserva o
+`security_invoker`. O `estoque_schema_normalizado.sql` traz a explicação ao lado do
+`alter view` da `vw_auditoria_movimentacoes`, e toda migração que mexer em qualquer das
+cinco views precisa escrever a opção dentro do próprio `create`.
 
-As migrações 01 a 08 já estão consolidadas no **`estoque_schema_normalizado.sql`**, na
+As migrações 01 a 09 já estão consolidadas no **`estoque_schema_normalizado.sql`**, na
 raiz do projeto, e por isso foram removidas da árvore de trabalho (veja como recuperá-las
 abaixo).
 
@@ -34,9 +35,9 @@ seguida — nunca em produção.
 ## Como recuperar uma migração antiga
 
 Nada foi perdido, só saiu da árvore de trabalho. Cada arquivo viveu até o commit que o
-removeu — `chore: remove as migracoes ja aplicadas` para as migrações 01 a 07, e o
-commit que tirou a 08 depois que ela rodou nos três bancos. O conteúdo está no pai
-desses commits:
+removeu — `chore: remove as migracoes ja aplicadas` para as migrações 01 a 07, o
+`chore: remove a migracao 08, ja aplicada nos tres bancos` para a 08, e o commit que tirou
+a 09 depois que ela rodou nos dois bancos. O conteúdo está no pai desses commits:
 
 ```bash
 # listar o que havia na pasta
@@ -58,7 +59,7 @@ O schema já carrega o **porquê** de cada decisão nos comentários — por que
 mínimo passa por função em vez de policy de UPDATE, por que a reversão de saldo é
 trigger e não RPC, por que as views precisam de `security_invoker`, e assim por diante.
 
-O que **não** está no schema são as receitas de teste. Duas são úteis o suficiente para
+O que **não** está no schema são as receitas de teste. Três são úteis o suficiente para
 valer o `git show` quando chegar a hora:
 
 - **Teste de RLS por usuário real** (seção 2.3 da migração 07): roda dentro de
@@ -73,6 +74,9 @@ valer o `git show` quando chegar a hora:
   locais, e o item que sobrevive com entregue = 0 quando a movimentação é excluída.
   Atenção: eles rodam em `begin/rollback` e não deixam linha, mas queimam ids da
   sequence — só em banco de testes.
+- **Teste de preferência do usuário** (migração 09): confere que o `check` de
+  `perfis.preferencia_requisicao` recusa valor fora da lista, e que a view de auditoria
+  voltou com `{security_invoker=true}` em `reloptions`.
 
 ## Convenção, daqui pra frente
 
