@@ -94,6 +94,12 @@ veredito numa `temp table` e terminar com um `select` dela. E o insert na temp t
 funciona com o role de volta ao normal: enquanto o role é `authenticated`, a tabela, que é
 do `postgres`, recusa a escrita.
 
+E trocar de usuário é **duas** configurações, não uma: `role` e `request.jwt.claims`. Voltar
+só o `role` deixa `auth.uid()` devolvendo o usuário anterior, então tudo que vem depois
+continua rodando com o RLS dele — e um trigger que olha `fn_is_admin()` continua vendo um
+não-admin. Vale também encerrar cada escrita do teste dentro de `begin/exception`: teste que
+aborta no meio não chega a mostrar o veredito.
+
 Quando houver migração nova, ela entra aqui como `NN_descricao.md` e o
 `estoque_schema_normalizado.sql` é sincronizado **no mesmo commit**. É isso que mantém
 o arquivo de criação como fonte da verdade e permite esta pasta voltar a ficar vazia

@@ -617,13 +617,20 @@ begin
     v_msg_item := 'barrado: ' || sqlerrm;
   end;
 
+  -- Volta ao contexto administrativo para LER. Limpar o role nao basta: se as
+  -- claims ficarem no lugar, auth.uid() continua devolvendo o usuario do teste
+  -- e tudo daqui para baixo roda com o RLS dele. Foi exatamente isso que
+  -- derrubou o teste 4 na primeira tentativa.
   perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
 
   select entregue_por into v_entregue1 from requisicoes      where id = v_req;
   select local_id     into v_local1    from requisicao_itens where id = v_item;
 
   insert into _verdito values
     ('usuario do teste',       v_uid::text),
+    ('contexto da leitura',    current_user || ', auth.uid() = '
+                               || coalesce(auth.uid()::text, 'nulo')),
     ('cabecalho: o que houve', v_msg_cab),
     ('item: o que houve',      v_msg_item),
     ('entregue_por mudou?',
@@ -639,7 +646,9 @@ select * from _verdito;
 rollback;
 ```
 
-**Esperado:** cinco linhas. Em `cabecalho: o que houve` e `item: o que houve`, ou
+**Esperado:** seis linhas. `contexto da leitura` tem que trazer `auth.uid() = nulo` — se
+trouxer um uuid, as claims não foram limpas e todo o resto do teste leu com o RLS do usuário
+de teste. Em `cabecalho: o que houve` e `item: o que houve`, ou
 `barrado: Apenas administradores podem...` (o trigger disparou) ou `sem erro, 0 linha(s)
 afetada(s)` (a policy recusou a linha antes). As duas últimas linhas têm que dizer
 `OK - continua como estava`.
@@ -651,9 +660,14 @@ RLS de qualquer coisa nova.
 
 ### 4. Item com entrega não pode ser excluído por não-admin
 
-Mesma forma do 3: veredito em tabela. E o teste vai além da proibição — ele mostra, no fim,
-o que acontece quando o **admin** exclui, que é exatamente o que a tela vai ter que avisar
-antes de deixar.
+Duas metades: a proibição para o gerente, e o que acontece quando o **admin** exclui — que é
+exatamente o que a tela vai ter que avisar antes de deixar.
+
+A segunda metade roda como um admin de verdade, não pelo contexto do SQL Editor. E as duas
+trocam `role` **e** `request.jwt.claims`: limpar só o role deixa `auth.uid()` devolvendo o
+usuário anterior, e o trigger continua vendo um não-admin. Foi assim que a primeira versão
+deste teste abortou no meio — com a mensagem do trigger, que é a prova de que ele funciona,
+mas no lugar errado.
 
 ```sql
 begin;
@@ -664,12 +678,14 @@ create temp table _verdito (etapa text, resultado text);
 do $$
 declare
   v_uid      uuid;
+  v_admin    uuid;
   v_item     int;
   v_entregas int;
   v_existe   int;
   v_linhas   int;
   v_orfas    int;
   v_msg      text;
+  v_msg_adm  text;
 begin
   select ri.id into v_item
     from requisicao_itens ri
@@ -677,7 +693,8 @@ begin
    group by ri.id
    order by ri.id limit 1;
 
-  select id into v_uid from perfis where ativo and not is_admin order by criado_em limit 1;
+  select id into v_uid   from perfis where ativo and not is_admin order by criado_em limit 1;
+  select id into v_admin from perfis where ativo and     is_admin order by criado_em limit 1;
 
   if v_item is null then
     insert into _verdito values
@@ -691,6 +708,7 @@ begin
 
   select count(*) into v_entregas from movimentacoes where requisicao_item_id = v_item;
 
+  -- 1. como o gerente
   perform set_config('role', 'authenticated', true);
   perform set_config('request.jwt.claims',
                      json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
@@ -703,30 +721,53 @@ begin
     v_msg := 'barrado: ' || sqlerrm;
   end;
 
+  -- 2. de volta ao contexto administrativo, so para ler. As claims TAMBEM
+  --    saem: sem isso auth.uid() continua sendo o gerente.
   perform set_config('role', 'none', true);
+  perform set_config('request.jwt.claims', '', true);
 
   select count(*) into v_existe from requisicao_itens where id = v_item;
 
   insert into _verdito values
     ('item escolhido',         format('id %s, com %s entrega(s)', v_item, v_entregas)),
-    ('nao-admin: o que houve', v_msg),
+    ('contexto da leitura',    current_user || ', auth.uid() = '
+                               || coalesce(auth.uid()::text, 'nulo')),
+    ('gerente: o que houve',   v_msg),
     ('item sobreviveu?',
       case when v_existe = 1 then 'OK - continua la' else 'FALHOU - foi excluido' end);
 
-  -- Agora o caminho do admin. Tudo dentro do begin/rollback: nada disso fica.
-  if v_existe = 1 then
-    delete from requisicao_itens where id = v_item;
+  -- 3. agora como admin de verdade, para ver a perda que a tela precisa avisar
+  if v_existe = 1 and v_admin is not null then
+    perform set_config('role', 'authenticated', true);
+    perform set_config('request.jwt.claims',
+                       json_build_object('sub', v_admin, 'role', 'authenticated')::text, true);
+
+    -- Dentro de begin/exception, como o de cima: teste que aborta no meio nao
+    -- chega a mostrar o veredito, e foi o que aconteceu aqui antes.
+    begin
+      delete from requisicao_itens where id = v_item;
+      get diagnostics v_linhas = row_count;
+      v_msg_adm := format('sem erro, %s linha(s) excluida(s)', v_linhas);
+    exception when others then
+      v_msg_adm := 'barrado: ' || sqlerrm;
+    end;
+
+    perform set_config('role', 'none', true);
+    perform set_config('request.jwt.claims', '', true);
 
     select count(*) into v_existe from requisicao_itens where id = v_item;
-    select count(*) into v_orfas  from movimentacoes
-      where requisicao_item_id is null;
+    select count(*) into v_orfas  from movimentacoes where requisicao_item_id is null;
 
     insert into _verdito values
-      ('admin exclui?',
+      ('admin: o que houve', v_msg_adm),
+      ('admin excluiu?',
         case when v_existe = 0
-             then format('OK - item saiu; %s entrega(s) ficaram sem vinculo, e agora sao %s as movimentacoes com requisicao_item_id nulo',
+             then format('OK - item saiu; %s entrega(s) ficaram sem vinculo, e agora sao %s movimentacoes com requisicao_item_id nulo',
                          v_entregas, v_orfas)
              else 'FALHOU - nem o admin conseguiu excluir' end);
+  elsif v_admin is null then
+    insert into _verdito values
+      ('admin excluiu?', 'PULADO: nenhum usuario admin ativo no banco');
   end if;
 end $$;
 
@@ -735,16 +776,25 @@ select * from _verdito;
 rollback;
 ```
 
-**Esperado:** quatro linhas. `nao-admin: o que houve` tem que trazer
-`barrado: Este item já tem N entrega(s)...` — e se trouxer `sem erro, 0 linha(s)
-excluida(s)`, foi a policy que recusou antes do trigger, o que também é aprovação, mas
-significa que o usuário escolhido não gerencia o local daquele item e o trigger continua
-sem prova. `item sobreviveu?` e `admin exclui?` têm que dizer `OK`.
+**Esperado:** seis linhas.
 
-A última linha é a que vale ler com atenção: ela mostra o número de movimentações que
-ficaram com `requisicao_item_id` nulo depois da exclusão pelo admin. É a perda que a tela
-precisa avisar — aquelas saídas continuam no Histórico, com saldo correto, mas sem o `#N` da
-requisição.
+| etapa | o que tem que vir |
+|---|---|
+| `item escolhido` | o id e o número de entregas |
+| `contexto da leitura` | `auth.uid() = nulo` — se vier um uuid, as claims não saíram |
+| `gerente: o que houve` | `barrado: Este item já tem N entrega(s)...` |
+| `item sobreviveu?` | `OK - continua la` |
+| `admin: o que houve` | `sem erro, 1 linha(s) excluida(s)` |
+| `admin excluiu?` | `OK - item saiu; ...` |
+
+Se `gerente: o que houve` vier `sem erro, 0 linha(s) excluida(s)`, foi a policy que recusou
+a linha antes do trigger. Também é aprovação, mas significa que o usuário sorteado não
+gerencia o local daquele item, e o trigger segue sem prova por este caminho.
+
+A última linha é a que vale ler com atenção: ela mostra quantas movimentações ficaram com
+`requisicao_item_id` nulo depois da exclusão pelo admin. É a perda que a tela precisa avisar
+— aquelas saídas continuam no Histórico, com o saldo correto, mas sem o `#N` da requisição.
+E nada disso fica no banco: o `rollback` desfaz as duas exclusões.
 
 ### 5. A view soma certo
 
