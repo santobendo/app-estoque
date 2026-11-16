@@ -473,6 +473,10 @@ sistema. O resto da função é idêntico ao que já estava rodando.
 Rode no banco de testes. Nenhum cria requisição ou movimentação; os que escrevem rodam em
 `begin/rollback`.
 
+Todos devolvem **tabela**. Nenhum depende de `raise notice`: o painel de resultado do SQL
+Editor não mostra notice, então teste que só emite notice parece não ter rodado. Os testes 3
+e 4 nasceram assim e foram reescritos.
+
 ### 1. Estrutura — um veredito só
 
 ```sql
@@ -534,33 +538,44 @@ rollback;
 
 ### 3. O trigger barra troca de responsável e de produto para não-admin
 
-Este roda como um usuário de verdade, com RLS, no mesmo molde do teste de RLS da migração
-07. Ele não espera exceção: espera que o valor **não mude** — porque, dependendo de qual
-usuário o banco escolher, a policy pode recusar a linha antes de o trigger ser chamado, e
-aí o update afeta zero linhas em silêncio. Os dois desfechos são aprovação; o que reprova é
-o valor ter mudado.
+Este roda como um usuário de verdade, com RLS, no molde do teste de RLS da migração 07. Ele
+não espera exceção: espera que o valor **não mude** — porque, dependendo de qual usuário o
+banco escolher, a policy pode recusar a linha antes de o trigger ser chamado, e aí o update
+afeta zero linhas em silêncio. Os dois desfechos são aprovação; o que reprova é o valor ter
+mudado.
+
+O veredito sai como **tabela**, não em Notices. A primeira versão deste teste usava
+`raise notice` e o painel de resultado do SQL Editor não mostra notice nenhum: o teste
+rodava e parecia não ter feito nada.
 
 ```sql
 begin;
+
+drop table if exists _verdito;
+create temp table _verdito (etapa text, resultado text);
 
 do $$
 declare
   v_uid       uuid;
   v_outro     uuid;
+  v_outro_loc int;
   v_req       int;
   v_item      int;
   v_entregue0 uuid;
   v_local0    int;
   v_entregue1 uuid;
   v_local1    int;
-  v_outro_loc int;
+  v_linhas    int;
+  v_msg_cab   text;
+  v_msg_item  text;
 begin
   select id into v_uid  from perfis where ativo and not is_admin order by criado_em limit 1;
   select id into v_req  from requisicoes      order by id limit 1;
   select id into v_item from requisicao_itens order by id limit 1;
 
   if v_uid is null or v_req is null or v_item is null then
-    raise notice 'PULADO: o banco precisa de um usuario nao-admin ativo, uma requisicao e um item';
+    insert into _verdito values
+      ('preparo', 'PULADO: precisa de um usuario nao-admin ativo, uma requisicao e um item');
     return;
   end if;
 
@@ -569,11 +584,12 @@ begin
 
   -- O alvo tem que ser DIFERENTE do valor atual, senao o `is distinct from` do
   -- trigger nao dispara e o teste passaria sem ter testado nada.
-  select id into v_outro      from perfis where id is distinct from v_entregue0 order by criado_em limit 1;
-  select id into v_outro_loc  from locais where id is distinct from v_local0    order by id        limit 1;
+  select id into v_outro     from perfis where id is distinct from v_entregue0 order by criado_em limit 1;
+  select id into v_outro_loc from locais where id is distinct from v_local0    order by id        limit 1;
 
   if v_outro is null or v_outro_loc is null then
-    raise notice 'PULADO: o banco precisa de dois perfis e dois locais para este teste';
+    insert into _verdito values
+      ('preparo', 'PULADO: precisa de dois perfis e de dois locais cadastrados');
     return;
   end if;
 
@@ -581,18 +597,24 @@ begin
   perform set_config('request.jwt.claims',
                      json_build_object('sub', v_uid, 'role', 'authenticated')::text, true);
 
+  -- As mensagens vao para variaveis, e nao direto para a _verdito: enquanto o
+  -- role e authenticated, inserir na temp table (que e do postgres) seria
+  -- recusado por falta de privilegio, e o erro apareceria como se fosse o
+  -- resultado do teste.
   begin
     update requisicoes set entregue_por = v_outro where id = v_req;
-    raise notice 'o update do cabecalho passou pela policy e nao levantou erro';
+    get diagnostics v_linhas = row_count;
+    v_msg_cab := format('sem erro, %s linha(s) afetada(s)', v_linhas);
   exception when others then
-    raise notice 'cabecalho barrado com erro: %', sqlerrm;
+    v_msg_cab := 'barrado: ' || sqlerrm;
   end;
 
   begin
     update requisicao_itens set local_id = v_outro_loc where id = v_item;
-    raise notice 'o update do item passou pela policy e nao levantou erro';
+    get diagnostics v_linhas = row_count;
+    v_msg_item := format('sem erro, %s linha(s) afetada(s)', v_linhas);
   exception when others then
-    raise notice 'item barrado com erro: %', sqlerrm;
+    v_msg_item := 'barrado: ' || sqlerrm;
   end;
 
   perform set_config('role', 'none', true);
@@ -600,27 +622,44 @@ begin
   select entregue_por into v_entregue1 from requisicoes      where id = v_req;
   select local_id     into v_local1    from requisicao_itens where id = v_item;
 
-  if v_entregue1 is distinct from v_entregue0 then
-    raise exception 'FALHOU: nao-admin trocou o entregue_por da requisicao';
-  end if;
-  if v_local1 is distinct from v_local0 then
-    raise exception 'FALHOU: nao-admin trocou o local do item';
-  end if;
-
-  raise notice 'OK: responsavel e local continuam como estavam';
+  insert into _verdito values
+    ('usuario do teste',       v_uid::text),
+    ('cabecalho: o que houve', v_msg_cab),
+    ('item: o que houve',      v_msg_item),
+    ('entregue_por mudou?',
+      case when v_entregue1 is distinct from v_entregue0
+           then 'FALHOU - mudou' else 'OK - continua como estava' end),
+    ('local_id mudou?',
+      case when v_local1 is distinct from v_local0
+           then 'FALHOU - mudou' else 'OK - continua como estava' end);
 end $$;
+
+select * from _verdito;
 
 rollback;
 ```
 
-**Esperado:** em Notices, as duas linhas de "barrado"/"passou" (qualquer combinação) e, no
-fim, `OK: responsavel e local continuam como estavam`. Qualquer `FALHOU` significa que o
-trigger da Parte 2 não entrou.
+**Esperado:** cinco linhas. Em `cabecalho: o que houve` e `item: o que houve`, ou
+`barrado: Apenas administradores podem...` (o trigger disparou) ou `sem erro, 0 linha(s)
+afetada(s)` (a policy recusou a linha antes). As duas últimas linhas têm que dizer
+`OK - continua como estava`.
+
+Qualquer `FALHOU` significa que o trigger da Parte 2 não entrou. E se vier a linha única de
+`PULADO`, o teste não testou nada: o banco de testes não tem usuário não-admin ativo, ou
+não tem dois locais. Vale criar um usuário comum ali — é o mesmo que falta para conferir
+RLS de qualquer coisa nova.
 
 ### 4. Item com entrega não pode ser excluído por não-admin
 
+Mesma forma do 3: veredito em tabela. E o teste vai além da proibição — ele mostra, no fim,
+o que acontece quando o **admin** exclui, que é exatamente o que a tela vai ter que avisar
+antes de deixar.
+
 ```sql
 begin;
+
+drop table if exists _verdito;
+create temp table _verdito (etapa text, resultado text);
 
 do $$
 declare
@@ -628,6 +667,9 @@ declare
   v_item     int;
   v_entregas int;
   v_existe   int;
+  v_linhas   int;
+  v_orfas    int;
+  v_msg      text;
 begin
   select ri.id into v_item
     from requisicao_itens ri
@@ -638,11 +680,12 @@ begin
   select id into v_uid from perfis where ativo and not is_admin order by criado_em limit 1;
 
   if v_item is null then
-    raise notice 'PULADO: nenhum item de requisicao tem entrega neste banco';
+    insert into _verdito values
+      ('preparo', 'PULADO: nenhum item de requisicao tem entrega neste banco');
     return;
   end if;
   if v_uid is null then
-    raise notice 'PULADO: nenhum usuario nao-admin ativo';
+    insert into _verdito values ('preparo', 'PULADO: nenhum usuario nao-admin ativo');
     return;
   end if;
 
@@ -654,35 +697,54 @@ begin
 
   begin
     delete from requisicao_itens where id = v_item;
-    raise notice 'o delete nao levantou erro (pode ter sido recusado pela policy)';
+    get diagnostics v_linhas = row_count;
+    v_msg := format('sem erro, %s linha(s) excluida(s)', v_linhas);
   exception when others then
-    raise notice 'barrado: %', sqlerrm;
+    v_msg := 'barrado: ' || sqlerrm;
   end;
 
   perform set_config('role', 'none', true);
 
   select count(*) into v_existe from requisicao_itens where id = v_item;
-  if v_existe = 0 then
-    raise exception 'FALHOU: nao-admin excluiu item com % entrega(s)', v_entregas;
+
+  insert into _verdito values
+    ('item escolhido',         format('id %s, com %s entrega(s)', v_item, v_entregas)),
+    ('nao-admin: o que houve', v_msg),
+    ('item sobreviveu?',
+      case when v_existe = 1 then 'OK - continua la' else 'FALHOU - foi excluido' end);
+
+  -- Agora o caminho do admin. Tudo dentro do begin/rollback: nada disso fica.
+  if v_existe = 1 then
+    delete from requisicao_itens where id = v_item;
+
+    select count(*) into v_existe from requisicao_itens where id = v_item;
+    select count(*) into v_orfas  from movimentacoes
+      where requisicao_item_id is null;
+
+    insert into _verdito values
+      ('admin exclui?',
+        case when v_existe = 0
+             then format('OK - item saiu; %s entrega(s) ficaram sem vinculo, e agora sao %s as movimentacoes com requisicao_item_id nulo',
+                         v_entregas, v_orfas)
+             else 'FALHOU - nem o admin conseguiu excluir' end);
   end if;
-
-  -- Agora o caminho do admin, para ver o que a tela precisa avisar antes de
-  -- deixar: o item sai e as movimentacoes ficam com o vinculo nulo.
-  delete from requisicao_itens where id = v_item;
-
-  select count(*) into v_existe from requisicao_itens where id = v_item;
-  if v_existe > 0 then
-    raise exception 'FALHOU: o admin nao conseguiu excluir o item';
-  end if;
-
-  raise notice 'OK: item protegido do nao-admin; pelo admin ele sai e % entrega(s) ficam sem vinculo', v_entregas;
 end $$;
+
+select * from _verdito;
 
 rollback;
 ```
 
-**Esperado:** em Notices, a linha `barrado: Este item já tem N entrega(s)...` e depois o
-`OK: ...`. Se aparecer `FALHOU`, a parte do `tg_op = 'DELETE'` do trigger não entrou.
+**Esperado:** quatro linhas. `nao-admin: o que houve` tem que trazer
+`barrado: Este item já tem N entrega(s)...` — e se trouxer `sem erro, 0 linha(s)
+excluida(s)`, foi a policy que recusou antes do trigger, o que também é aprovação, mas
+significa que o usuário escolhido não gerencia o local daquele item e o trigger continua
+sem prova. `item sobreviveu?` e `admin exclui?` têm que dizer `OK`.
+
+A última linha é a que vale ler com atenção: ela mostra o número de movimentações que
+ficaram com `requisicao_item_id` nulo depois da exclusão pelo admin. É a perda que a tela
+precisa avisar — aquelas saídas continuam no Histórico, com saldo correto, mas sem o `#N` da
+requisição.
 
 ### 5. A view soma certo
 

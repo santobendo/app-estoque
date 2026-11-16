@@ -6,7 +6,7 @@ não entra mais nesta tabela.
 
 | Migração | Testes | Produção A |
 |---|---|---|
-| `10_telas_requisicao.md` | | |
+| `10_telas_requisicao.md` | ✓ 16/11/2026 | |
 
 Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os dois estiverem
 em dia — foi o que aconteceu com a 09, aplicada nos dois em 09/11/2026 e removida daqui.
@@ -85,6 +85,14 @@ valer o `git show` quando chegar a hora:
   voltou com `{security_invoker=true}` em `reloptions`.
 
 ## Convenção, daqui pra frente
+
+**Teste tem que devolver tabela.** O painel de resultado do SQL Editor não mostra
+`raise notice`, então um teste feito de notices roda e parece não ter feito nada — foi o que
+aconteceu com os testes 3 e 4 da migração 10, reescritos depois disso. Quando o teste
+precisa de bloco `do` (para trocar de role, ou para capturar exceção), o jeito é juntar o
+veredito numa `temp table` e terminar com um `select` dela. E o insert na temp table só
+funciona com o role de volta ao normal: enquanto o role é `authenticated`, a tabela, que é
+do `postgres`, recusa a escrita.
 
 Quando houver migração nova, ela entra aqui como `NN_descricao.md` e o
 `estoque_schema_normalizado.sql` é sincronizado **no mesmo commit**. É isso que mantém
