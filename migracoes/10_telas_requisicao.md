@@ -938,6 +938,20 @@ Então a RPC continua criando o item com `quantidade_solicitada = quantidade ent
 pedido continua não sabendo distinguir uma linha que nasceu de uma entrega. O preço disso é
 só de leitura, e está aceito.
 
+Para ver o que isso significa na prática, o caso 2: pedido #42 montado com Arroz 5kg — 10, e
+o operador entrega clicando em Arroz 1kg.
+
+| produto | solicitada | entregue |
+|---|---|---|
+| Arroz 5kg | 10 | 0 |
+| Arroz 1kg | **10** | 10 |
+
+O 10 em negrito é invenção da RPC — ninguém pediu Arroz 1kg. Com o nulo, aquela linha
+ficaria com `solicitada = null` e a tela mostraria duas seções, "o pedido" e "entregue sem
+constar no pedido". Sem ele, as duas linhas são indistinguíveis. **Em troca, nenhuma
+constraint existente foi alterada por esta migração**, o que não é pouco: era o único item
+do plano que mexia em regra de dado já gravado.
+
 Duas consequências práticas, para quem for codar as telas:
 
 1. **Não existe seção de "extras"** na tela da requisição. Todos os itens aparecem numa
@@ -948,8 +962,31 @@ Duas consequências práticas, para quem for codar as telas:
    10, que é o que de fato aconteceu. Excluir a linha *entregue* seria o contrário: é o que
    o `tg_protege_requisicao_item` barra para não-admin.
 
-Se um dia a distinção virar necessária, há um caminho que custa zero no schema: um item
-criado pela entrega tem `criado_em` **exatamente igual** ao `criado_em` da sua primeira
-movimentação, porque os dois nascem na mesma transação e o `now()` do Postgres é o instante
-da transação. Um item criado pela tela de pedido nasce em outra transação, mais cedo. Dá
-para derivar o marcador na view, sem coluna nova e sem mexer em constraint.
+### Se um dia a distinção virar necessária
+
+Ela pode ser **derivada**, sem coluna nova e sem mexer em constraint. O mecanismo:
+
+`now()` no Postgres é `transaction_timestamp()` — congela no início da transação e devolve o
+mesmo valor até o fim dela. Não é o relógio; para o relógio existe o `clock_timestamp()`.
+Como `requisicao_itens.criado_em` e `movimentacoes.criado_em` são os dois `default now()`, e
+a `fn_registra_saida_requisicao` insere o item e a movimentação **na mesma transação**, os
+dois nascem com timestamps idênticos, no microssegundo. Um item criado pela tela de pedido,
+ao contrário, nasce numa transação anterior — a entrega vem depois, outro dia até.
+
+Então "nasceu de uma entrega" é isto, numa view:
+
+```sql
+exists (
+  select 1 from movimentacoes m
+   where m.requisicao_item_id = i.id
+     and m.criado_em = i.criado_em
+) as nasceu_da_entrega
+```
+
+É igualdade exata, não janela de tolerância — e é por isso que funciona.
+
+Os limites, para não vender mais do que é: se alguém **excluir a movimentação que criou o
+item**, o marcador deixa de encontrar par e a linha volta a parecer pedida. E ele passa a
+errar no dia em que algum caminho novo criar item de pedido e entrega na mesma transação —
+o que hoje não existe, mas é o tipo de coisa que muda sem ninguém lembrar deste parágrafo.
+Se for para valer de verdade, aí a coluna nula é mais honesta que a dedução.
