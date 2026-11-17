@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { ChevronLeft, ChevronRight, MessageSquareText } from 'lucide-react';
 import { useCarregamento } from '../lib/useCarregamento';
@@ -58,6 +58,8 @@ function Progresso({ r }) {
 }
 
 export default function Requisicoes() {
+  const navigate = useNavigate();
+
   /* filtros */
   const [filtroSituacao, setFiltroSituacao] = useState('');
   /* Número da requisição: texto com dígitos filtrados na entrada, igual ao
@@ -197,24 +199,25 @@ export default function Requisicoes() {
                 <th>Digitado por</th>
                 <th>Entregue por</th>
                 <th className="w-10 text-center">Obs</th>
+                <th className="w-20" />
               </tr>
             </thead>
             <tbody>
               {carregando ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-10 text-app-text-secondary text-[13px]">
+                  <td colSpan={8} className="text-center py-10 text-app-text-secondary text-[13px]">
                     Carregando...
                   </td>
                 </tr>
               ) : erro ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-10 text-rose-600 text-[13px]">
+                  <td colSpan={8} className="text-center py-10 text-rose-600 text-[13px]">
                     {erro}
                   </td>
                 </tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-10 text-app-text-secondary text-[13px]">
+                  <td colSpan={8} className="text-center py-10 text-app-text-secondary text-[13px]">
                     {/* Com filtro por número a mensagem pode ser categórica: o
                         cabeçalho da requisição é legível por qualquer usuário
                         ativo, então "não aparece" aqui quer dizer mesmo "não
@@ -231,15 +234,18 @@ export default function Requisicoes() {
                 rows.map(r => {
                   const situacao = situacaoDe(r);
                   return (
-                    <tr key={r.id}>
-                      <td className="font-bold tabular-nums">
-                        <Link
-                          to={`/requisicoes/${r.id}`}
-                          className="hover:underline underline-offset-2"
-                        >
-                          #{r.id}
-                        </Link>
-                      </td>
+                    /* A linha inteira leva ao detalhe, no mesmo padrão do
+                       Catálogo — que é onde o hábito já existe. O primeiro
+                       desenho tinha só o número como link, e ele era
+                       invisível: negrito preto com sublinhado no hover é
+                       igualzinho ao texto que estava ali antes, e ninguém
+                       descobre clicável aquilo que não muda de aparência. */
+                    <tr
+                      key={r.id}
+                      className="cursor-pointer"
+                      onClick={() => navigate(`/requisicoes/${r.id}`)}
+                    >
+                      <td className="font-bold tabular-nums">#{r.id}</td>
                       <td className="text-[12px] whitespace-nowrap">{formatarDataHora(r.data)}</td>
                       <td><SituacaoBadge situacao={situacao} /></td>
                       <td><Progresso r={r} /></td>
@@ -257,6 +263,16 @@ export default function Requisicoes() {
                             </span>
                           )
                           : <span className="text-app-text-label text-[12px]">—</span>}
+                      </td>
+                      <td className="text-right">
+                        {/* stopPropagation para o clique não navegar duas vezes
+                            — o mesmo cuidado do botão "Detalhes" do Catálogo. */}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); navigate(`/requisicoes/${r.id}`); }}
+                          className="text-app-text-label hover:text-app-text font-semibold text-[12px] uppercase tracking-wide transition-colors cursor-pointer"
+                        >
+                          Abrir
+                        </button>
                       </td>
                     </tr>
                   );
