@@ -19,6 +19,7 @@ import ProdutoDetalhe     from './pages/ProdutoDetalhe';
 import CadastroCategorias from './pages/CadastroCategorias';
 import CadastroLocais     from './pages/CadastroLocais';
 import CadastroUnidades   from './pages/CadastroUnidades';
+import Requisicoes        from './pages/Requisicoes';
 import Preferencias       from './pages/Preferencias';
 
 function App() {
@@ -36,6 +37,7 @@ function App() {
             <Route path="produtos/:id"     element={<ProdutoDetalhe />} />
             <Route path="movimentacoes"    element={<Movimentacoes />} />
             <Route path="historico"        element={<Historico />} />
+            <Route path="requisicoes"      element={<Requisicoes />} />
             <Route path="compras"          element={<Compras />} />
             <Route path="relatorio-estoque" element={<RelatorioEstoque />} />
             <Route path="cadastros"            element={<Cadastros />} />

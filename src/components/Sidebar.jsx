@@ -3,6 +3,7 @@ import { NavLink } from 'react-router-dom';
 import {
   LayoutGrid, ArrowRightLeft, History,
   ShoppingCart, Settings, Box, LogOut, ClipboardList, FileText, SlidersHorizontal,
+  FileStack,
 } from 'lucide-react';
 import { useAuth } from '../contexts/auth';
 
@@ -13,6 +14,7 @@ function Sidebar() {
     { name: 'Catálogo',          path: '/',               icon: <LayoutGrid size={18} /> },
     { name: 'Movimentações',     path: '/movimentacoes',  icon: <ArrowRightLeft size={18} /> },
     { name: 'Histórico',         path: '/historico',      icon: <History size={18} /> },
+    { name: 'Requisições',      path: '/requisicoes',    icon: <FileStack size={18} /> },
     { name: 'Sugestão de Compra',path: '/compras',        icon: <ShoppingCart size={18} /> },
     { name: 'Relatório de Estoque',path: '/relatorio-estoque', icon: <FileText size={18} /> },
     { name: 'Cadastros',         path: '/cadastros',      icon: <ClipboardList size={18} /> },
