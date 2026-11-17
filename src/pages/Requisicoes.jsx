@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { ChevronLeft, ChevronRight, MessageSquareText } from 'lucide-react';
 import { useCarregamento } from '../lib/useCarregamento';
 import { inicioDoDiaISO, fimDoDiaISO, formatarDataHora } from '../lib/datas';
+import { situacaoDe, aplicarSituacao } from '../lib/requisicoes';
+import SituacaoBadge from '../components/SituacaoBadge';
 
 const PAGE_SIZE = 20;
 
@@ -19,52 +22,6 @@ const PAGE_SIZE = 20;
    itens dos locais que ele enxerga. É por isso que o gerente de um local pode
    ver uma requisição com "0 itens": ela existe e é de outra pessoa, mas não
    tem nada que seja dele. O subtítulo diz isso em voz alta. */
-
-/* ─── Situação ───
-   Derivada, e não guardada. Só o encerramento à mão é coluna (`fechada_em`),
-   porque é decisão de alguém — informação nova, que soma nenhuma produz. O
-   resto sai das contagens, que se corrigem sozinhas quando uma movimentação é
-   excluída. Mesma razão de `quantidade_entregue` não ser coluna.
-
-   Esta função e o `aplicarSituacao` abaixo precisam dizer a MESMA coisa. Se um
-   dos dois mudar sozinho, a tela vai mostrar "Aberta" numa linha que o filtro
-   "Abertas" não traz, e o usuário não tem como adivinhar o porquê. */
-function situacaoDe(r) {
-  if (r.fechada_em) return 'encerrada';
-  if (Number(r.itens) > 0 && Number(r.itens_pendentes) === 0) return 'concluida';
-  return 'aberta';
-}
-
-const SITUACOES = {
-  aberta:    { rotulo: 'Aberta',    classe: 'badge-sky' },
-  concluida: { rotulo: 'Concluída', classe: 'badge-emerald' },
-  encerrada: { rotulo: 'Encerrada', classe: 'badge-violet' },
-};
-
-/* O espelho de situacaoDe() no servidor. A requisição sem nenhum item visível
-   cai em "aberta" nos dois lados, e de propósito: ela não foi concluída coisa
-   alguma — ou acabou de nascer, ou tem itens só em locais alheios. */
-function aplicarSituacao(query, situacao) {
-  if (situacao === 'encerrada') {
-    return query.not('fechada_em', 'is', null);
-  }
-  if (situacao === 'concluida') {
-    return query.is('fechada_em', null).eq('itens_pendentes', 0).gt('itens', 0);
-  }
-  if (situacao === 'aberta') {
-    return query.is('fechada_em', null).or('itens_pendentes.gt.0,itens.eq.0');
-  }
-  return query;
-}
-
-function SituacaoBadge({ situacao }) {
-  const s = SITUACOES[situacao];
-  return (
-    <span className={`badge ${s.classe} w-fit px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wide`}>
-      {s.rotulo}
-    </span>
-  );
-}
 
 /* Progresso em ITENS, não em quantidade. A soma das quantidades existe na view
    (total_solicitado e total_entregue) e vai no title, mas não serve de barra:
@@ -275,7 +232,14 @@ export default function Requisicoes() {
                   const situacao = situacaoDe(r);
                   return (
                     <tr key={r.id}>
-                      <td className="font-bold tabular-nums">#{r.id}</td>
+                      <td className="font-bold tabular-nums">
+                        <Link
+                          to={`/requisicoes/${r.id}`}
+                          className="hover:underline underline-offset-2"
+                        >
+                          #{r.id}
+                        </Link>
+                      </td>
                       <td className="text-[12px] whitespace-nowrap">{formatarDataHora(r.data)}</td>
                       <td><SituacaoBadge situacao={situacao} /></td>
                       <td><Progresso r={r} /></td>
@@ -327,14 +291,6 @@ export default function Requisicoes() {
         )}
       </div>
 
-      {/* O número ainda não leva a lugar nenhum: a tela da requisição
-          (/requisicoes/:id) é o próximo passo, e é lá que vão morar o campo de
-          observações, o encerrar e o adicionar item. Quando ela existir, o #N
-          vira link e este aviso sai daqui. */}
-      <p className="text-[11px] text-app-text-label">
-        Esta tela é só de leitura por enquanto. Abrir uma requisição para editar, encerrar
-        ou adicionar itens é a próxima etapa.
-      </p>
     </div>
   );
 }

@@ -15,11 +15,26 @@
 
 const dd = (n) => String(n).padStart(2, '0');
 
-/* Valor para <input type="datetime-local">: "AAAA-MM-DDTHH:MM" local. */
-export function agoraParaInput() {
-  const d = new Date();
+/* Valor para <input type="datetime-local">: "AAAA-MM-DDTHH:MM" local.
+
+   Aceita o que vier do banco (string ISO com Z) ou um Date. É o caminho de
+   ida do campo de data da tela da requisição: ler o timestamptz, mostrar no
+   fuso de quem edita, e devolver com new Date(valor).toISOString() no submit
+   — que é o único uso legítimo do toISOString, mandar instante ao banco.
+
+   O atalho óbvio, valor.slice(0, 16), estaria errado pelo mesmo motivo do
+   bug das três horas: a string do banco está em UTC e o campo lê o que recebe
+   como local, então 17:30 gravado viraria 20:30 na tela aqui no Brasil. */
+export function dataHoraParaInput(valor) {
+  const d = valor instanceof Date ? valor : new Date(valor);
+  if (Number.isNaN(d.getTime())) return '';
   return `${d.getFullYear()}-${dd(d.getMonth() + 1)}-${dd(d.getDate())}`
        + `T${dd(d.getHours())}:${dd(d.getMinutes())}`;
+}
+
+/* Agora, no mesmo formato. Era a função inteira antes de existir a de cima. */
+export function agoraParaInput() {
+  return dataHoraParaInput(new Date());
 }
 
 /* "AAAA-MM-DD" de hoje, local. Para nome de arquivo e valor de <input
