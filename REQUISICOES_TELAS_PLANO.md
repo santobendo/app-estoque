@@ -370,6 +370,26 @@ saldo a entregar — sem seção de extras, pela 3.3; botões "adicionar item", 
 para Movimentações vinculada) e "encerrar". Excluir item que já tem entrega só aparece para
 admin, e com aviso.
 
+**Feita em 17/11/2026**, menos o "entregar" e o "encerrar", que são o passo 5. Três coisas
+que a escrita decidiu e não estavam aqui:
+
+- **Todo `update` e `delete` leva `.select()` junto.** O RLS recusa essas duas operações em
+  silêncio — zero linhas afetadas, sem erro —, então sem isso a tela diria "salvo" quando
+  nada foi salvo. O `insert` não tem esse problema: lá a recusa vem como 42501.
+- **O `traduzErro` passou a deixar a mensagem dos triggers passar.** Ele devolvia "Você não
+  tem permissão para esta operação" para todo 42501, o que apagava justamente o texto do
+  `fn_protege_requisicao_item` — o que diz quantas entregas o item tem e manda excluir a
+  movimentação no Histórico primeiro. Agora só a recusa de policy, que vem em inglês do
+  Postgres, cai no texto genérico.
+- **O combobox de produto saiu de `Movimentacoes.jsx`** para `components/ProdutoBusca.jsx`,
+  porque "adicionar item" precisa do mesmo campo. A seção 4 previa isso só se a 3.7 fosse
+  (b); o adicionar item antecipou.
+
+E uma coisa que a tela **não** consegue dizer, e por isso não tenta: lista de itens vazia
+pode ser pedido vazio ou pedido inteiro em local alheio. A `vw_requisicoes` é
+`security_invoker`, então a contagem dela passa pelo mesmo RLS da consulta de itens e os
+dois números são sempre iguais — não há de onde tirar a diferença.
+
 **Movimentações** — ganha a terceira opção de requisição funcionando de verdade. Hoje
 "Requisição existente" abre o modal e lista as requisições; passa a aceitar também chegar
 já vinculada pela tela da requisição, via rota.
@@ -422,10 +442,9 @@ caminho que cria quase toda requisição do sistema.
 1. ~~Você responde a seção 3~~ — feito em 10 e 11/11/2026
 2. ~~Migração 10, com os testes~~ — escrita em `migracoes/10_telas_requisicao.md`; falta
    você rodar no banco de testes
-3. Lista de requisições (a tela mais simples, e já dá valor sozinha: hoje não há onde ver
-   as requisições fora do modal)
-4. Tela da requisição, sem o encerrar
-5. Encerrar, extras e o vínculo com Movimentações
+3. ~~Lista de requisições~~ — feita em 16/11/2026, em `/requisicoes`
+4. ~~Tela da requisição, sem o encerrar~~ — feita em 17/11/2026, em `/requisicoes/:id`
+5. Encerrar e o vínculo com Movimentações (os "extras" saíram na resposta da 3.3)
 6. Teste, e aí produção
 7. Depois, em branch dedicada: entrega em lote (3.7b), com a RPC de lote
 
