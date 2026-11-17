@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/auth';
@@ -52,21 +52,21 @@ function podeEditarCabecalho({ cabecalho, itens, isAdmin, userId, podeEditarLoca
   return itens.some(i => podeEditarLocal(i.local_id));
 }
 
+/* As quantidades são numeric(12,4) no banco, mas somadas aqui viram float:
+   sem isto 0.1 + 0.2 apareceria como 0.30000000000000004 no rodapé. */
+const arred = (n) => Number(n.toFixed(4));
+
 /* Descreve a consequência antes de confirmar, como o Histórico faz na
    exclusão de movimentação. Os dois casos são bem diferentes: tirar uma linha
    que ninguém entregou não perde nada, e tirar uma entregue apaga o vínculo
    das movimentações com a requisição — por isso o segundo texto é mais longo
    e só admin chega nele. */
-/* As quantidades são numeric(12,4) no banco, mas somadas aqui viram float:
-   sem isto 0.1 + 0.2 apareceria como 0.30000000000000004 no rodapé. */
-const arred = (n) => Number(n.toFixed(4));
-
 function mensagemExclusaoItem(i) {
   const entregue = Number(i.quantidade_entregue);
   const alvo = `${i.produto} (${i.apresentacao}) em ${i.local}`;
 
   if (entregue > 0) {
-    return `O item ${alvo} já tem entrega registrada — ${entregue} em movimentações. `
+    return `O item ${alvo} já tem ${entregue} entregue em movimentações. `
       + 'Excluí-lo faz essas movimentações perderem o vínculo com a requisição: elas '
       + 'continuam no Histórico e o saldo do estoque não muda, mas a coluna "Req" fica '
       + 'em branco e não há como refazer o vínculo. Continuar?';
@@ -88,6 +88,15 @@ function mensagemEncerrar(id, pendentes, faltando) {
     + 'reabrir depois.';
 }
 
+function Aviso({ texto }) {
+  return (
+    <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-2.5 text-[12px]">
+      <AlertCircle size={14} className="shrink-0 mt-0.5" />
+      <span>{texto}</span>
+    </div>
+  );
+}
+
 export default function RequisicaoDetalhe() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -105,6 +114,10 @@ export default function RequisicaoDetalhe() {
   const [editItem, setEditItem]       = useState(null);  // { id, valor }
   const [novoItem, setNovoItem]       = useState(null);  // { busca, produto, apresentacaoId, localId, quantidade }
   const [confirmacao, setConfirmacao] = useState(null);
+  /* Foco de volta no campo de produto depois de cada item adicionado — o
+     mesmo cuidado que Movimentações tem depois de cada gravação. Montar um
+     pedido de quinze linhas sem tirar a mão do teclado depende disto. */
+  const buscaItemRef = useRef(null);
   const [salvando, setSalvando]       = useState(false);
   const [erroForm, setErroForm]       = useState(null);
 
@@ -380,9 +393,16 @@ export default function RequisicaoDetalhe() {
       return;
     }
 
-    setNovoItem(null);
+    /* O formulário continua aberto, só limpo, porque montar pedido é repetir:
+       fechar a cada item obrigaria a clicar em "Adicionar item" quinze vezes
+       numa requisição de quinze linhas. O local é o único campo que sobrevive
+       — é quase sempre o mesmo em todo o pedido. */
+    setNovoItem(n => ({
+      busca: '', produto: null, apresentacaoId: '', localId: n.localId, quantidade: '',
+    }));
     toast.sucesso('Item adicionado ao pedido.');
     recarregar();
+    buscaItemRef.current?.focus();
   };
 
   /* ─────────── render ─────────── */
@@ -391,7 +411,7 @@ export default function RequisicaoDetalhe() {
     return <div className="p-8 text-center text-app-text-secondary text-[13px]">Carregando...</div>;
   }
 
-  /* Falha de carga nao e ausencia: dizer "nao existe" depois de um erro de
+  /* Falha de carga não é ausência: dizer "não existe" depois de um erro de
      rede seria uma mentira com cara de certeza. */
   if (erro && !cabecalho) {
     return (
@@ -399,7 +419,7 @@ export default function RequisicaoDetalhe() {
         <AlertCircle size={32} className="text-rose-400" />
         <p className="text-[14px] font-semibold text-rose-600">{erro}</p>
         <button className="btn btn-secondary px-4 py-2" onClick={() => navigate('/requisicoes')}>
-          Voltar as requisicoes
+          Voltar às requisições
         </button>
       </div>
     );
@@ -450,12 +470,10 @@ export default function RequisicaoDetalhe() {
         </p>
       </div>
 
-      {erroForm && (
-        <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-2.5 text-[12px]">
-          <AlertCircle size={14} className="shrink-0 mt-0.5" />
-          <span>{erroForm}</span>
-        </div>
-      )}
+      {/* Com o formulário de item aberto o aviso desce para dentro dele: numa
+          requisição longa o topo da página está fora da tela, e "Escolha um
+          produto" lá em cima é o mesmo que não dizer nada. */}
+      {erroForm && !novoItem && <Aviso texto={erroForm} />}
 
       {/* ─── Cabeçalho ─── */}
       <div className="card p-6 flex flex-col gap-5">
@@ -560,7 +578,7 @@ export default function RequisicaoDetalhe() {
             aparece como concluído, e encerrá-lo só trocaria um selo melhor por
             um pior. Requisição sem nenhum item continua encerrável — ela está
             aberta e ninguém vai atender. */}
-        {!editCab && (podeEditarCab || isAdmin) && (
+        {!editCab && podeEditarCab && (
           <div className="flex flex-wrap gap-2 justify-end border-t border-app-border-inner pt-4">
             {isAdmin && (
               <button
@@ -813,6 +831,7 @@ export default function RequisicaoDetalhe() {
               <div className="flex flex-col gap-1.5">
                 <Label required>Produto</Label>
                 <ProdutoBusca
+                  inputRef={buscaItemRef}
                   valor={novoItem.busca}
                   /* Funcional, e nao {...novoItem}: o ProdutoBusca dispara
                      onValorChange e onSelect no mesmo onChange, e duas copias do
@@ -869,11 +888,17 @@ export default function RequisicaoDetalhe() {
                   step="any"
                   value={novoItem.quantidade}
                   onChange={e => setNovoItem(n => ({ ...n, quantidade: e.target.value }))}
+                  /* Enter adiciona: o campo é o fim do caminho do teclado, e
+                     este bloco não é um <form> — sem isto o Enter não faria
+                     nada, que é o pior resultado possível para quem digita. */
+                  onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); adicionarItem(); } }}
                   placeholder="em embalagens"
                   className="input-base"
                 />
               </div>
             </div>
+
+            {erroForm && <Aviso texto={erroForm} />}
 
             <div className="flex gap-2 justify-end">
               <button
@@ -881,7 +906,7 @@ export default function RequisicaoDetalhe() {
                 onClick={() => { setNovoItem(null); setErroForm(null); }}
                 disabled={salvando}
               >
-                Cancelar
+                Fechar
               </button>
               <button
                 className="btn btn-primary px-4 py-2 text-[12px]"
