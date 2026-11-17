@@ -30,6 +30,25 @@ export function hojeParaInput() {
   return `${d.getFullYear()}-${dd(d.getMonth() + 1)}-${dd(d.getDate())}`;
 }
 
+/* Data e hora para leitura, no fuso do navegador: "17/11/2026 14:30".
+
+   Mora aqui porque eram TRES copias — Historico, SecaoRequisicao e
+   RelatorioEstoque —, e a lista de requisicoes seria a quarta. As duas
+   primeiras eram identicas; a terceira recebia um Date em vez da string ISO e
+   nao tinha a guarda de nulo, que e como copia comeca a divergir. O
+   `new Date(valor)` aceita os dois, entao a assinatura cobre as tres telas.
+
+   Note que aqui o toLocale* e o certo: ele converte o timestamptz, guardado em
+   UTC, para o fuso de quem esta lendo. O que nao pode e o caminho inverso —
+   toISOString() para montar valor de campo, que foi o bug das tres horas. */
+export function formatarDataHora(valor) {
+  if (!valor) return '\u2014';
+  return new Date(valor).toLocaleString('pt-BR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+}
+
 /* Extremos do dia local em ISO, para comparar com timestamptz no banco.
 
    "2026-10-15" sozinho no construtor do Date é lido como meia-noite UTC —

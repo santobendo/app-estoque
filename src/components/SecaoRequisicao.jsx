@@ -4,6 +4,7 @@ import {
   FilePlus, FileSearch, FileX, Search, X, ChevronDown, ChevronUp, AlertCircle,
 } from 'lucide-react';
 import { normalizar } from '../lib/texto';
+import { formatarDataHora } from '../lib/datas';
 import Kbd from './Kbd';
 import { Spinner } from './TabelaCrud';
 import { Label, SectionHeader } from './Secao';
@@ -20,14 +21,6 @@ import CartaoOpcao from './CartaoOpcao';
    sai na primeira saída" em vez de um número: criar ao abrir a tela deixaria
    uma requisição vazia cada vez que alguém entra aqui só para conferir um
    saldo, e furos na numeração. */
-
-function formatarData(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-}
 
 /* O modal lista as mais recentes, que é o caso de uso real: ninguém entrega
    contra uma requisição de semanas atrás. O número vale ser constante porque
@@ -184,7 +177,7 @@ function ModalRequisicoes({ onSelecionar, onFechar }) {
                   </span>
                 </div>
                 <p className="text-[11px] text-app-text-secondary mt-0.5">
-                  {formatarData(r.criado_em)} · digitou {r.digitado_por_nome ?? '—'} · entregou {r.entregue_por_nome ?? '—'}
+                  {formatarDataHora(r.criado_em)} · digitou {r.digitado_por_nome ?? '—'} · entregou {r.entregue_por_nome ?? '—'}
                 </p>
               </button>
             ))
@@ -351,7 +344,7 @@ export default function SecaoRequisicao({
               <div className="flex flex-col gap-1.5">
                 <Label>Data</Label>
                 <p className="text-[13px] text-app-text pt-[2px]">
-                  {requisicao ? formatarData(requisicao.criado_em) : 'na primeira saída'}
+                  {requisicao ? formatarDataHora(requisicao.criado_em) : 'na primeira saída'}
                 </p>
               </div>
 

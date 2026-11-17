@@ -8,7 +8,7 @@ import { traduzErro } from '../lib/erros';
 import { useToast } from '../lib/toast';
 import { normalizar } from '../lib/texto';
 import { useCarregamento } from '../lib/useCarregamento';
-import { inicioDoDiaISO, fimDoDiaISO } from '../lib/datas';
+import { inicioDoDiaISO, fimDoDiaISO, formatarDataHora } from '../lib/datas';
 
 const PAGE_SIZE = 20;
 
@@ -31,14 +31,6 @@ function TipoBadge({ tipo }) {
       Saída
     </span>
   );
-}
-
-function formatarData(iso) {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
 }
 
 /* Descreve a consequência antes de confirmar. Uma pergunta só com "tem
@@ -358,7 +350,7 @@ export default function Historico() {
               ) : (
                 rows.map(r => (
                   <tr key={r.id}>
-                    <td className="text-[12px] whitespace-nowrap">{formatarData(r.data)}</td>
+                    <td className="text-[12px] whitespace-nowrap">{formatarDataHora(r.data)}</td>
                     <td><TipoBadge tipo={r.tipo} /></td>
                     <td className="font-semibold">{r.produto}</td>
                     <td className="text-app-text-secondary text-[12px]">{r.apresentacao}</td>

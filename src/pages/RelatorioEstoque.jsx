@@ -3,14 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { useLocal } from '../contexts/local';
 import { Search, Download, Printer, Package } from 'lucide-react';
 import { normalizar, algumContem } from '../lib/texto';
-import { hojeParaInput } from '../lib/datas';
-
-function formatarDataHora(d) {
-  return d.toLocaleString('pt-BR', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit',
-  });
-}
+import { hojeParaInput, formatarDataHora } from '../lib/datas';
 
 export default function RelatorioEstoque() {
   const { localAtual, loadingLocal } = useLocal();
