@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../contexts/auth';
 import { useLocal } from '../contexts/local';
@@ -69,7 +69,31 @@ export default function Movimentacoes() {
      `perfil` é null, um useState com a preferência dentro leria null e
      congelaria em 'sem', e um efeito para corrigir depois seria render em
      cascata com setState dentro de efeito. */
+  /* Chegada pela tela da requisição: /movimentacoes?requisicao=42. A URL
+     ganha da sessão de propósito — quem clicou em "Entregar" num número
+     específico quer aquele número, e não o que estava aberto antes nesta aba.
+
+     É parâmetro de URL, e não state de navegação nem sessionStorage escrito
+     na saída, por três motivos práticos: sobrevive ao F5, aparece na barra de
+     endereço (ninguém fica adivinhando por que a tela abriu vinculada) e pode
+     ser colado. Depois de consumido ele sai da URL, e daí em diante vale a
+     sessão, como antes. */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const reqDaUrl = searchParams.get('requisicao');
+
   const [opcaoEscolhida, setOpcaoEscolhida] = useState(() => {
+    /* O número que veio na URL é gravado na sessão, que já é a fonte única de
+       "qual requisição está ativa nesta aba" — e aí o efeito de restauração
+       lá embaixo continua o mesmo de antes, sem precisar conhecer a URL. É
+       também assim que a URL ganha da sessão: sobrescrevendo-a. */
+    if (reqDaUrl) {
+      try {
+        sessionStorage.setItem(CHAVE_REQ, JSON.stringify({
+          opcao: 'existente', id: Number(reqDaUrl),
+        }));
+      } catch { /* aba privada sem storage: o parâmetro vale só nesta visita */ }
+      return 'existente';
+    }
     try {
       return JSON.parse(sessionStorage.getItem(CHAVE_REQ) ?? 'null')?.opcao ?? null;
     } catch {
@@ -93,10 +117,16 @@ export default function Movimentacoes() {
   const [loading, setLoading]   = useState(false);
   const [erros, setErros]       = useState({});
 
-  /* Por ora o fluxo de requisição é só de administrador, como combinado. O
-     banco já aceita gerente de local (as policies filtram os itens por
-     local), então liberar depois é apagar o isAdmin desta linha — não precisa
-     de migração. */
+  /* O fluxo de requisição aqui é só de administrador, e isso foi reafirmado em
+     17/11/2026, quando a tela da requisição ganhou o botão "entregar":
+     "por enquanto vamos liberar a entrega apenas para os admins".
+
+     O banco não precisa de nada — as policies de requisicao_itens filtram por
+     local e a RPC já roda no RLS de quem chama. Para liberar para gerente de
+     local no dia em que a decisão mudar, são duas linhas: apagar o isAdmin
+     daqui, e tirar o `isAdmin &&` do botão "Entregar" em
+     pages/RequisicaoDetalhe.jsx. Os selects de "quem digitou / quem entregou"
+     continuam de admin por conta própria, dentro do SecaoRequisicao. */
   const mostraRequisicao = isAdmin && modo === 'movimento' && tipo === 'saida';
   const comRequisicao    = mostraRequisicao && opcaoReq !== 'sem';
 
@@ -111,12 +141,16 @@ export default function Movimentacoes() {
     return data ?? [];
   }, [isAdmin], []);
 
-  /* ─ Restaura a requisição ativa depois de um F5 ─
+  /* ─ Carrega a requisição vinda da URL, ou restaura a ativa depois de um F5 ─
      Se ela não voltar (foi excluída, ou o usuário perdeu acesso), a sessão é
-     limpa em silêncio — insistir num número morto seria pior. */
+     limpa em silêncio — insistir num número morto seria pior.
+
+     Não precisa saber da URL: o parâmetro já foi gravado na sessão pelo
+     useState aí em cima, então aqui só existe um caminho. */
   useEffect(() => {
     let salvo = null;
     try { salvo = JSON.parse(sessionStorage.getItem(CHAVE_REQ) ?? 'null'); } catch { salvo = null; }
+
     if (!salvo?.id) return;
 
     let vivo = true;
@@ -131,6 +165,17 @@ export default function Movimentacoes() {
       });
     return () => { vivo = false; };
   }, []);
+
+  /* ─ Limpa o parâmetro depois de consumido ─
+     A URL para de mentir assim que o número virou estado desta aba. Sem isto,
+     trocar para "sem requisição" e dar F5 ressuscitaria o vínculo, e a pessoa
+     não teria como saber por quê. `replace` para o botão voltar levar à
+     requisição, e não a esta mesma tela sem o parâmetro.
+
+     Converge em um render: apagado, reqDaUrl é null e a guarda retorna. */
+  useEffect(() => {
+    if (reqDaUrl) setSearchParams({}, { replace: true });
+  }, [reqDaUrl, setSearchParams]);
 
   /* ─ Guarda a escolha desta sessão ─
      O primeiro render é ignorado de propósito: ele rodaria com o estado

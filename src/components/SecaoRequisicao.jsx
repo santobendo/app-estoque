@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import {
   FilePlus, FileSearch, FileX, Search, X, ChevronDown, ChevronUp, AlertCircle,
@@ -320,7 +321,19 @@ export default function SecaoRequisicao({
                   Número
                 </p>
                 {requisicao ? (
-                  <p className="text-2xl font-bold text-app-text leading-tight">#{requisicao.id}</p>
+                  <>
+                    <p className="text-2xl font-bold text-app-text leading-tight">#{requisicao.id}</p>
+                    {/* O caminho de volta. Sem ele, quem veio da tela da
+                        requisição para entregar precisa achar o número de novo
+                        no menu — e é justo depois de lançar a baixa que se quer
+                        conferir o pedido. */}
+                    <Link
+                      to={`/requisicoes/${requisicao.id}`}
+                      className="text-[11px] font-semibold text-sky-700 hover:underline underline-offset-2"
+                    >
+                      ver o pedido
+                    </Link>
+                  </>
                 ) : (
                   <p className="text-[13px] text-app-text-secondary mt-1 max-w-sm">
                     {opcao === 'nova'

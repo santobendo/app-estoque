@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/auth';
 import { useLocal } from '../contexts/local';
 import {
   ChevronLeft, FileStack, Plus, Pencil, Trash2, Check, X, AlertCircle,
-  MessageSquareText,
+  MessageSquareText, ArrowUpCircle, Lock, Unlock,
 } from 'lucide-react';
 import { ConfirmDialog, Spinner } from '../components/TabelaCrud';
 import ProdutoBusca from '../components/ProdutoBusca';
@@ -22,10 +22,15 @@ import { situacaoDe } from '../lib/requisicoes';
    entregue e saldo, e as duas edições que a migração 10 liberou para o
    gerente — corrigir a quantidade de um item e tirar uma linha.
 
-   O que ela AINDA não faz, de propósito, porque é o próximo passo do plano:
-   encerrar (fechada_em continua só de leitura aqui) e o botão "entregar" que
-   abre Movimentações já vinculada a este número. Entregar hoje é ir a
-   Movimentações e escolher a requisição no modal.
+   Encerrar e reabrir moram aqui também: `fechada_em` é coluna comum, coberta
+   pela mesma policy de update do cabeçalho e fora da lista de negação do
+   tg_protege_requisicao — quem edita o cabeçalho encerra, e desfaz.
+
+   A entrega não acontece aqui: o botão leva a Movimentações já vinculada ao
+   número, que é onde moram saldo, motivo e o combobox. E só aparece para
+   admin, porque a seção de requisição de lá é de admin — decisão do Matheus em
+   17/11/2026, registrada no REQUISICOES_TELAS_PLANO.md com o que é preciso
+   mexer no dia em que ela mudar.
 
    Como a lista, esta tela não segue o local da barra superior: a requisição
    cruza locais por desenho. O que o acesso limita são os ITENS — o RLS da
@@ -68,6 +73,19 @@ function mensagemExclusaoItem(i) {
   }
   return `Excluir o item ${alvo}? Nenhuma entrega aponta para ele, então nada do `
     + 'histórico se perde — só o registro de que este item foi pedido.';
+}
+
+/* Encerrar é o caso "pedi 10, só tinha 8, está encerrada assim": o pedido sai
+   da lista de pendências sem que ninguém minta que foi atendido. A confirmação
+   diz o tamanho do que fica para trás, porque esse é o ponto da decisão. */
+function mensagemEncerrar(id, pendentes, faltando) {
+  if (pendentes === 0) {
+    return `Encerrar a requisição #${id}? Ela sai da lista de pendências. Dá para reabrir depois.`;
+  }
+  const item = pendentes === 1 ? '1 item' : `${pendentes} itens`;
+  return `Encerrar a requisição #${id}? ${item} ainda devem ${faltando} embalagens, e ficam `
+    + 'registrados assim — pedido e não atendido. Ela sai da lista de pendências, e dá para '
+    + 'reabrir depois.';
 }
 
 export default function RequisicaoDetalhe() {
@@ -144,6 +162,17 @@ export default function RequisicaoDetalhe() {
      tela não tem como distinguir — então diz os dois. */
   const semItensVisiveis = itens.length === 0;
 
+  /* Contado da lista carregada, e não do cabecalho.itens_pendentes: são o
+     mesmo número (a view é security_invoker, mesmo RLS), e tirar da lista
+     mantém o que o botão afirma igual ao que a tabela mostra. */
+  const itensPendentes = itens.filter(
+    i => Number(i.quantidade_entregue) < Number(i.quantidade_solicitada),
+  );
+  const faltandoTotal = arred(itensPendentes.reduce(
+    (t, i) => t + (Number(i.quantidade_solicitada) - Number(i.quantidade_entregue)), 0,
+  ));
+  const encerrada = Boolean(cabecalho?.fechada_em);
+
   const totalSolicitado = arred(itens.reduce((s, i) => s + Number(i.quantidade_solicitada), 0));
   const totalEntregue   = arred(itens.reduce((s, i) => s + Number(i.quantidade_entregue), 0));
   const temExcedente    = itens.some(i => Number(i.quantidade_entregue) > Number(i.quantidade_solicitada));
@@ -201,6 +230,44 @@ export default function RequisicaoDetalhe() {
     toast.sucesso('Requisição atualizada.');
     recarregar();
   };
+
+  /* fechada_em entra pela mesma policy de update do resto do cabeçalho, e o
+     tg_protege_requisicao não a protege — ela não é auditoria nem responsável,
+     é decisão revogável. O .select() pelo motivo de sempre: o RLS recusa
+     UPDATE em silêncio. */
+  const mudarFechamento = async (fechar) => {
+    setSalvando(true); setErroForm(null);
+
+    const { data, error } = await supabase
+      .from('requisicoes')
+      .update({ fechada_em: fechar ? new Date().toISOString() : null })
+      .eq('id', id)
+      .select('id');
+
+    setSalvando(false);
+
+    if (error) { setErroForm(traduzErro(error)); return; }
+    if (!data || data.length === 0) {
+      setErroForm('Nada mudou — você não tem permissão para encerrar esta requisição.');
+      return;
+    }
+
+    toast.sucesso(fechar ? 'Requisição encerrada.' : 'Requisição reaberta.');
+    recarregar();
+  };
+
+  const confirmarEncerrar = () => setConfirmacao({
+    mensagem: mensagemEncerrar(cabecalho.id, itensPendentes.length, faltandoTotal),
+    onConfirm: () => { setConfirmacao(null); mudarFechamento(true); },
+  });
+
+  const confirmarReabrir = () => setConfirmacao({
+    mensagem: `Reabrir a requisição #${cabecalho.id}? Ela volta a valer como pedido em aberto`
+      + (itensPendentes.length > 0
+        ? ' e reaparece na lista de pendências.'
+        : ' — e, como nada está pendente, vai aparecer como concluída.'),
+    onConfirm: () => { setConfirmacao(null); mudarFechamento(false); },
+  });
 
   /* ─────────── itens ─────────── */
 
@@ -484,6 +551,45 @@ export default function RequisicaoDetalhe() {
             <p className="text-[13px] text-app-text-label">—</p>
           )}
         </div>
+
+        {/* Entregar, encerrar e reabrir. Fora do modo de edição de propósito:
+            são ações imediatas, e misturar com Salvar/Cancelar faria parecer que
+            dependem de salvar o formulário.
+
+            "Encerrar" desaparece quando não há nada pendente: o pedido já
+            aparece como concluído, e encerrá-lo só trocaria um selo melhor por
+            um pior. Requisição sem nenhum item continua encerrável — ela está
+            aberta e ninguém vai atender. */}
+        {!editCab && (podeEditarCab || isAdmin) && (
+          <div className="flex flex-wrap gap-2 justify-end border-t border-app-border-inner pt-4">
+            {isAdmin && (
+              <button
+                className="btn btn-secondary px-4 py-2 text-[12px]"
+                onClick={() => navigate(`/movimentacoes?requisicao=${cabecalho.id}`)}
+                title="Abre Movimentações já vinculada a esta requisição"
+              >
+                <ArrowUpCircle size={14} /> Entregar
+              </button>
+            )}
+            {podeEditarCab && (encerrada ? (
+              <button
+                className="btn btn-secondary px-4 py-2 text-[12px]"
+                onClick={confirmarReabrir}
+                disabled={salvando}
+              >
+                <Unlock size={14} /> Reabrir
+              </button>
+            ) : (itensPendentes.length > 0 || itens.length === 0) && (
+              <button
+                className="btn btn-secondary px-4 py-2 text-[12px]"
+                onClick={confirmarEncerrar}
+                disabled={salvando}
+              >
+                <Lock size={14} /> Encerrar
+              </button>
+            ))}
+          </div>
+        )}
 
         {editCab && (
           <div className="flex gap-2 justify-end border-t border-app-border-inner pt-4">
@@ -795,11 +901,13 @@ export default function RequisicaoDetalhe() {
         )}
       </div>
 
-      {/* O que ainda não está aqui, dito em voz alta para ninguém procurar: */}
+      {/* A baixa de estoque continua em Movimentações, e isso não é provisório:
+          saldo, motivo, modo ajuste e o teclado inteiro moram lá, e uma segunda
+          tela de entrega seria a mesma regra escrita duas vezes. */}
       <p className="text-[11px] text-app-text-label">
-        A entrega é lançada na tela de Movimentações, escolhendo esta requisição em
-        "Requisição existente". O botão que abre Movimentações já vinculada ao #{cabecalho.id}
-        e o encerrar do pedido são a próxima etapa.
+        {isAdmin
+          ? 'A baixa em si acontece em Movimentações — "Entregar" abre aquela tela já vinculada a este número, com saldo do local, motivo e o combobox de produto.'
+          : 'A entrega é lançada em Movimentações, e por enquanto só administradores fazem esse lançamento. Montar e corrigir o pedido é aqui.'}
       </p>
     </div>
   );

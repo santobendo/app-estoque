@@ -390,6 +390,45 @@ pode ser pedido vazio ou pedido inteiro em local alheio. A `vw_requisicoes` é
 `security_invoker`, então a contagem dela passa pelo mesmo RLS da consulta de itens e os
 dois números são sempre iguais — não há de onde tirar a diferença.
 
+**Encerrar, feito em 17/11/2026.** `fechada_em` é coluna comum: a mesma policy de update
+do cabeçalho a cobre e o `tg_protege_requisicao` não a protege — ela não é auditoria nem
+responsável, é decisão revogável. **Decidido com o Matheus: quem encerra pode reabrir**,
+com confirmação nos dois sentidos. A razão de não ser só de admin: encerrar por engano, ou
+encerrar e a mercadoria chegar, são eventos do dia, e nada se perde no caminho de volta.
+
+Dois detalhes da tela que não estavam previstos aqui:
+
+- **"Encerrar" desaparece quando não há item pendente.** O pedido já aparece como
+  concluído, e encerrá-lo trocaria o selo "Concluída" pelo "Encerrada" — informação pior,
+  porque `situacaoDe` dá prioridade ao encerramento. Requisição **sem nenhum item** continua
+  encerrável: ela está aberta e ninguém vai atender.
+- **A confirmação diz o tamanho do que fica para trás** ("2 itens ainda devem 6
+  embalagens"), porque esse é exatamente o ponto da decisão.
+
+**A entrega continua só de admin — decisão do Matheus em 17/11/2026:** "por enquanto vamos
+liberar a entrega apenas para os admins, deixe anotado essa decisão para caso eu peça para
+mudar um dia." Então o botão "Entregar" da tela da requisição só aparece para admin, e a
+seção de requisição de Movimentações segue com o `isAdmin &&` que sempre teve.
+
+**No dia em que mudar, são duas linhas, e nenhuma migração:** apagar o `isAdmin` do
+`mostraRequisicao` em `pages/Movimentacoes.jsx` e o `isAdmin &&` do botão "Entregar" em
+`pages/RequisicaoDetalhe.jsx`. O banco já está pronto — as policies de `requisicao_itens`
+filtram por local e a RPC roda no RLS de quem chama —, e os selects de "quem digitou / quem
+entregou" continuam de admin por conta própria, dentro do `SecaoRequisicao`.
+
+**O vínculo, como ficou.** O botão leva a `/movimentacoes?requisicao=42`. Parâmetro de URL,
+e não `state` de navegação: sobrevive ao F5, aparece na barra de endereço (ninguém fica
+adivinhando por que a tela abriu vinculada) e pode ser colado. Movimentações consome o
+número gravando-o na chave de sessão que já era a fonte única de "qual requisição está
+ativa nesta aba" — é assim que a URL ganha da sessão, sobrescrevendo-a — e depois apaga o
+parâmetro, para que trocar para "sem requisição" e dar F5 não ressuscite o vínculo.
+
+E o caminho de volta, que faltava: a seção de requisição de Movimentações ganhou um "ver o
+pedido" embaixo do número, e a coluna **Req** do Histórico virou link para a requisição.
+Os dois pintados de azul, e não só sublinhados no hover: o primeiro desenho do `#N` na lista
+era negrito preto, idêntico ao texto que havia antes do link existir, e **não foi
+encontrado** — o Matheus abriu a tela e não achou por onde entrar.
+
 **Movimentações** — ganha a terceira opção de requisição funcionando de verdade. Hoje
 "Requisição existente" abre o modal e lista as requisições; passa a aceitar também chegar
 já vinculada pela tela da requisição, via rota.
@@ -444,7 +483,8 @@ caminho que cria quase toda requisição do sistema.
    você rodar no banco de testes
 3. ~~Lista de requisições~~ — feita em 16/11/2026, em `/requisicoes`
 4. ~~Tela da requisição, sem o encerrar~~ — feita em 17/11/2026, em `/requisicoes/:id`
-5. Encerrar e o vínculo com Movimentações (os "extras" saíram na resposta da 3.3)
+5. ~~Encerrar e o vínculo com Movimentações~~ — feito em 17/11/2026 (os "extras" saíram
+   na resposta da 3.3)
 6. Teste, e aí produção
 7. Depois, em branch dedicada: entrega em lote (3.7b), com a RPC de lote
 

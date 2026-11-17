@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { useLocal } from '../contexts/local';
 import { useAuth } from '../contexts/auth';
@@ -359,8 +360,20 @@ export default function Historico() {
                     <td className="text-[12px]">{r.motivo_descricao ?? '—'}</td>
                     <td className="text-[12px] text-app-text-secondary">{r.usuario}</td>
                     <td className="text-[12px] whitespace-nowrap">
+                      {/* Link pintado de azul, e não só sublinhado no hover:
+                          negrito preto idêntico ao texto que estava ali antes
+                          não avisa ninguém de que leva a algum lugar — foi o
+                          que aconteceu com o #N da lista de requisições. */}
                       {r.requisicao_id
-                        ? <span className="font-semibold">#{r.requisicao_id}</span>
+                        ? (
+                          <Link
+                            to={`/requisicoes/${r.requisicao_id}`}
+                            className="font-semibold text-sky-700 hover:underline underline-offset-2"
+                            title={`Abrir a requisição #${r.requisicao_id}`}
+                          >
+                            #{r.requisicao_id}
+                          </Link>
+                        )
                         : <span className="text-app-text-label">—</span>}
                     </td>
                     {isAdmin && (
