@@ -444,7 +444,18 @@ export default function RequisicaoDetalhe() {
 
   /* ─────────── render ─────────── */
 
-  if (carregando) {
+  /* Tela cheia de "Carregando..." so quando nao ha o que mostrar: primeira
+     carga, ou troca para outra requisicao. Depois de gravar algo o
+     recarregar() mantem os dados antigos na mao enquanto a resposta nova nao
+     chega, e desmontar a pagina inteira nesse instante era o que jogava o
+     scroll de volta ao topo a cada item adicionado.
+
+     A comparacao com o id da URL e o que separa os dois casos. Sem ela,
+     navegar da requisicao 5 para a 7 mostraria a 5 por um instante — dado de
+     outro lugar na tela, que e pior que um spinner. */
+  const mesmaRequisicao = cabecalho && String(cabecalho.id) === String(id);
+
+  if (carregando && !mesmaRequisicao) {
     return <div className="p-8 text-center text-app-text-secondary text-[13px]">Carregando...</div>;
   }
 
@@ -502,6 +513,10 @@ export default function RequisicaoDetalhe() {
           <SituacaoBadge situacao={situacao} />
         </div>
         <p className="text-[13px] text-app-text-secondary mt-0.5">
+          {/* A atualizacao em curso aparece aqui, discreta: a tela continua
+              mostrando o estado anterior, e sem este aviso nada diria que ele
+              esta a um instante de mudar. */}
+          {carregando && <span className="text-app-text-label">atualizando… · </span>}
           Registrada em {formatarDataHora(cabecalho.criado_em)}
           {cabecalho.fechada_em && <> · encerrada em {formatarDataHora(cabecalho.fechada_em)}</>}
         </p>
