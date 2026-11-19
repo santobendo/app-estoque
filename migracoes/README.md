@@ -7,6 +7,7 @@ não entra mais nesta tabela.
 | Migração | Testes | Produção A |
 |---|---|---|
 | `10_telas_requisicao.md` | ✓ 16/11/2026 | |
+| `11_requisicao_fechada.md` | | |
 
 Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os dois estiverem
 em dia — foi o que aconteceu com a 09, aplicada nos dois em 09/11/2026 e removida daqui.
@@ -17,6 +18,14 @@ por coluna), a `vw_requisicoes` com os totais, e a RPC datando o cabeçalho pela
 movimentação. Atenção a uma coisa: a Parte 1 **escreve em linha existente** — preenche
 `data` com o `criado_em` de cada requisição que já existe. É o único update em dado antigo,
 e sem ele as requisições velhas nasceriam datadas do dia em que a migração rodou.
+
+A **11** fecha um buraco que o teste da 10 revelou: `fechada_em` era rótulo, não estado —
+a RPC continuava aceitando entrega contra pedido encerrado, e a tela continuava aceitando
+item novo. Dois triggers `before insert`, um em `requisicao_itens` e um em `movimentacoes`,
+recusam as duas coisas. **Vale para admin e para o SQL Editor também**, ao contrário dos
+triggers de proteção da 10: aqueles são regra de privilégio, este é regra de estado do
+pedido. Para mexer num pedido encerrado, reabra — é um update só. Não escreve em linha
+existente, e o rollback é só derrubar os dois triggers.
 
 Fica valendo o aviso que ela deixou: `create or replace view` **não** preserva o
 `security_invoker`. O `estoque_schema_normalizado.sql` traz a explicação ao lado do

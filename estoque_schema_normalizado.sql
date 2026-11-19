@@ -651,6 +651,94 @@ comment on function fn_protege_requisicao_item() is
   'Impede que não-admin troque requisicao_id, apresentacao_id ou local_id de um item, e que exclua item que já tem entrega — o delete apagaria em silêncio o vínculo da movimentação com a requisição.';
 
 -- -------------------------------------------------------------
+-- 11.4 TRIGGERS — requisição encerrada não recebe mais nada
+--      (migração 11)
+--
+--      Sem isto, `fechada_em` era rótulo e não estado: a RPC de
+--      entrega continuava aceitando saída contra o pedido
+--      encerrado, e a tela do pedido continuava aceitando item
+--      novo. Um pedido "Encerrado" voltava a crescer sem que
+--      ninguém percebesse.
+--
+--      É trigger, e não checagem dentro da RPC, porque a entrega
+--      tem mais de um caminho: a RPC, um insert direto em
+--      movimentacoes pela API e um insert em requisicao_itens pela
+--      tela. Mesmo raciocinio do tg_protege_requisicao_item.
+--
+--      E não há exceção para `auth.uid() is null` como nos dois
+--      triggers acima: aqueles são regra de PRIVILÉGIO, e o SQL
+--      Editor é contexto administrativo; este é regra de ESTADO do
+--      pedido e vale para todo mundo, admin inclusive. O caminho
+--      para mexer num pedido encerrado é reabri-lo, que é um
+--      update só — e é o que a mensagem manda fazer.
+-- -------------------------------------------------------------
+create or replace function fn_bloqueia_requisicao_fechada()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_req_id  int;
+  v_fechada timestamptz;
+  v_oque    text;
+begin
+  if tg_table_name = 'requisicao_itens' then
+    v_req_id := NEW.requisicao_id;
+    v_oque   := 'adicionar itens';
+  else
+    -- O trigger de movimentacoes já filtra com WHEN, mas a guarda fica aqui
+    -- também: um trigger novo criado sem o WHEN passaria calado.
+    if NEW.requisicao_item_id is null then
+      return NEW;
+    end if;
+
+    -- security definer importa exatamente aqui: se esta leitura passasse pelo
+    -- RLS do usuário, item de local alheio devolveria zero linhas, v_req_id
+    -- ficaria nulo e o trigger LIBERARIA a entrega. Guarda que falha para o
+    -- lado permissivo é pior que guarda nenhuma.
+    select requisicao_id into v_req_id
+      from requisicao_itens
+     where id = NEW.requisicao_item_id;
+
+    v_oque := 'registrar entregas';
+  end if;
+
+  select fechada_em into v_fechada from requisicoes where id = v_req_id;
+
+  if v_fechada is not null then
+    -- errcode no default (P0001): não é falta de permissão, e o traduzErro do
+    -- front deixa P0001 passar com a mensagem inteira — que é o que explica o
+    -- caminho de volta.
+    raise exception
+      'A requisição % foi encerrada em %. Reabra-a para %.',
+      v_req_id,
+      to_char(v_fechada at time zone 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI'),
+      v_oque;
+  end if;
+
+  return NEW;
+end;
+$$;
+
+comment on function fn_bloqueia_requisicao_fechada() is
+  'Recusa item novo e entrega nova em requisição com fechada_em preenchido. Vale para admin e para o SQL Editor: é regra de estado do pedido, não de privilégio — o caminho é reabrir.';
+
+-- BEFORE, e não AFTER: em movimentacoes o tg_atualiza_estoque é AFTER INSERT,
+-- então recusar antes garante que o saldo não é tocado nem por um instante.
+create trigger tg_bloqueia_item_requisicao_fechada
+  before insert on requisicao_itens
+  for each row
+  execute function fn_bloqueia_requisicao_fechada();
+
+create trigger tg_bloqueia_entrega_requisicao_fechada
+  before insert on movimentacoes
+  for each row
+  when (new.requisicao_item_id is not null)
+  execute function fn_bloqueia_requisicao_fechada();
+
+
+-- -------------------------------------------------------------
 -- 12. VIEW — consumo por produto nos últimos 30 dias
 --     Ajustada para usar motivo_id em vez de texto livre.
 --     Os códigos 'descarte' e 'ajuste' são filtrados via join na
