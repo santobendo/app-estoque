@@ -580,7 +580,11 @@ export default function RequisicaoDetalhe() {
             aberta e ninguém vai atender. */}
         {!editCab && podeEditarCab && (
           <div className="flex flex-wrap gap-2 justify-end border-t border-app-border-inner pt-4">
-            {isAdmin && (
+            {/* Encerrada não oferece "Entregar": desde a migração 11 o banco
+                recusa entrega em pedido encerrado, e mandar o usuário a
+                Movimentações para tomar um erro lá seria desrespeito. O
+                caminho está ao lado — Reabrir. */}
+            {isAdmin && !encerrada && (
               <button
                 className="btn btn-secondary px-4 py-2 text-[12px]"
                 onClick={() => navigate(`/movimentacoes?requisicao=${cabecalho.id}`)}
@@ -638,12 +642,28 @@ export default function RequisicaoDetalhe() {
               o que foi pedido, quanto já saiu e o que falta
             </p>
           </div>
-          {locaisEditaveis.length > 0 && !novoItem && (
+          {locaisEditaveis.length > 0 && !novoItem && !encerrada && (
             <button className="btn btn-primary px-3 py-1.5 text-[12px]" onClick={abrirNovoItem}>
               <Plus size={14} /> Adicionar item
             </button>
           )}
         </div>
+
+        {/* O estado encerrado dito onde a ação aconteceria. A autoridade é o
+            trigger da migração 11, não este aviso: uma aba aberta há meia hora
+            não sabe que alguem encerrou o pedido do outro lado, e é por isso
+            que o banco também recusa. */}
+        {encerrada && (
+          <div className="px-6 py-3 bg-violet-50 border-b border-violet-200 flex items-start gap-2 text-[12px] text-violet-900">
+            <Lock size={14} className="shrink-0 mt-0.5" />
+            <span>
+              Pedido encerrado em {formatarDataHora(cabecalho.fechada_em)} — não aceita item
+              novo nem entrega. {podeEditarCab
+                ? 'Reabra, ali em cima, para voltar a mexer.'
+                : 'Quem digitou o pedido, ou um administrador, pode reabrir.'}
+            </span>
+          </div>
+        )}
 
         {/* 3.2: entregar mais do que o pedido avisa e deixa passar, porque
             bloquear faria o operador lançar a sobra sem requisição — e aí o

@@ -54,6 +54,11 @@ function ModalRequisicoes({ onSelecionar, onFechar }) {
     supabase
       .from('vw_requisicoes')
       .select('id, criado_em, atualizado_em, digitado_por, entregue_por, digitado_por_nome, entregue_por_nome, itens')
+      /* O título desta lista sempre disse "Requisições abertas", e até a
+         migração 11 era mentira: ela trazia tudo, encerradas inclusive. Agora
+         o banco recusa entrega em pedido encerrado, então oferecê-lo aqui
+         seria oferecer um caminho que termina em erro. */
+      .is('fechada_em', null)
       .order('atualizado_em', { ascending: false })
       .limit(LIMITE_LISTA)
       .then(({ data }) => {
@@ -309,6 +314,28 @@ export default function SecaoRequisicao({
           <div className="flex items-center gap-2 bg-rose-50 border border-rose-200 text-rose-700 rounded-lg px-4 py-2.5 text-[12px]">
             <AlertCircle size={14} className="shrink-0" />
             <span>{erro}</span>
+          </div>
+        )}
+
+        {/* A requisição ativa pode ter sido encerrada depois de escolhida —
+            restaurada da sessão num F5, ou encerrada por outra pessoa com esta
+            aba aberta. O modal não lista mais encerradas, mas essas duas portas
+            continuam existindo, e é melhor avisar antes do que deixar o banco
+            recusar depois de a pessoa digitar a quantidade. */}
+        {requisicao?.fechada_em && (
+          <div className="flex items-start gap-2 bg-violet-50 border border-violet-200 text-violet-900 rounded-lg px-4 py-2.5 text-[12px]">
+            <AlertCircle size={14} className="shrink-0 mt-0.5" />
+            <span>
+              A requisição #{requisicao.id} está <span className="font-semibold">encerrada</span>,
+              e o banco vai recusar a entrega. Reabra o pedido em{' '}
+              <Link
+                to={`/requisicoes/${requisicao.id}`}
+                className="font-semibold underline underline-offset-2"
+              >
+                /requisicoes/{requisicao.id}
+              </Link>
+              , ou escolha outra requisição.
+            </span>
           </div>
         )}
 
