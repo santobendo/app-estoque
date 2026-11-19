@@ -489,3 +489,61 @@ caminho que cria quase toda requisição do sistema.
 7. Depois, em branch dedicada: entrega em lote (3.7b), com a RPC de lote
 
 Os passos 3 a 5 são commits separados na mesma branch, cada um com a tela funcionando.
+
+---
+
+## 7. O que o teste de 19/11/2026 encontrou
+
+Três achados do Matheus usando as telas, na ordem de gravidade que ele deu.
+
+### 7.1 Requisição encerrada aceitava entrega — **grave**, virou migração 11
+
+`fechada_em` era rótulo, não estado. A RPC continuava aceitando saída contra pedido
+encerrado, o modal continuava oferecendo-o, e dava para adicionar item nele — um pedido
+"Encerrado" voltava a crescer com o selo dizendo o contrário.
+
+Conserto em `migracoes/11_requisicao_fechada.md`: dois triggers `before insert`, um em
+`requisicao_itens` e um em `movimentacoes` (este com `when (new.requisicao_item_id is not
+null)`), chamando uma função só. Três decisões que o conserto tomou:
+
+- **Trigger, e não checagem na RPC**, porque a entrega tem três caminhos: a RPC, um
+  `insert` direto em `movimentacoes` pela API e um `insert` em `requisicao_itens` pela tela.
+- **Vale para admin e para o SQL Editor**, ao contrário dos triggers de proteção da 10.
+  Aqueles são regra de *privilégio* e abrem exceção para `auth.uid() is null`; este é regra
+  de *estado do pedido*, e abrir exceção deixaria o furo aberto justo para quem mais usa o
+  sistema — hoje só admin entrega. O caminho é reabrir, que é um update só.
+- **Bloqueia item novo também.** Poder montar mas não entregar seria incoerente.
+
+Na tela, cortesia em cima disso: "Entregar" e "Adicionar item" desaparecem no pedido
+encerrado, com aviso dizendo desde quando; e o modal de "requisição existente" passou a
+listar só as abertas — o título dele sempre disse "Requisições abertas" e até agora era
+mentira.
+
+### 7.2 O local de retirada não conferia se havia estoque
+
+O `local_id` do item é o local de **retirada**, e a tela oferecia todos os locais que o
+usuário gerencia — inclusive os que nem estocam o produto. O banco não barra:
+`requisicao_itens` aponta para apresentação e local **sem passar por `estoques`**. Dava para
+montar um pedido impossível por construção.
+
+Resolvido na tela, sem migração: a consulta de apresentações passou a trazer
+`estoques(local_id)` aninhado, e dela saem as embalagens que têm estoque em algum local do
+usuário e os locais de cada embalagem. **Fica registrado que isto é regra de tela, não do
+banco** — uma chamada direta à API ainda consegue criar item em local sem estoque. Se um
+dia isso importar, o lugar é um trigger checando `exists (select 1 from estoques ...)`, e
+aí vale decidir o que fazer com o vínculo de estoque removido depois.
+
+### 7.3 Adicionar item jogava o scroll para o topo — prioridade baixa, causa real
+
+A causa não era o scroll: era o `early return` de "Carregando...". O `recarregar()` depois
+de cada gravação deixava `carregando` verdadeiro, a página inteira desmontava e o navegador
+perdia a posição. A tela cheia de carregamento agora só aparece quando não há o que
+mostrar — primeira carga, ou troca para outra requisição, comparando o id da URL com o que
+está na mão. Sem essa comparação, ir da requisição 5 para a 7 mostraria a 5 por um
+instante, que é pior que um spinner.
+
+### Ordem de deploy, que agora tem duas migrações
+
+**10 e 11 precisam estar em produção A antes do deploy deste código.** A lista e o modal
+leem `fechada_em`, que é da 10; sem ela o `select` quebra na coluna que não existe. E sem a
+11 o furo da 7.1 continua aberto em produção.
