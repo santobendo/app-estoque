@@ -147,11 +147,18 @@ export default function RequisicaoDetalhe() {
     return data ?? [];
   }, [isAdmin], []);
 
+  /* O `estoques(local_id)` aninhado é o que permite oferecer só local que
+     realmente estoca a embalagem. Vem na mesma consulta porque é a mesma
+     pergunta: "o que dá para pedir deste produto, e de onde".
+
+     O RLS de estoques é por local, então esta lista já chega recortada pelo
+     que o usuário vê — e o cruzamento com locaisEditaveis, abaixo, reduz do
+     "que vejo" para o "que gerencio". */
   const { dados: apresentacoes } = useCarregamento(async () => {
     if (!novoItem?.produto) return [];
     const { data, error } = await supabase
       .from('apresentacoes')
-      .select('id, descricao, quantidade_unitaria, unidades(sigla)')
+      .select('id, descricao, quantidade_unitaria, unidades(sigla), estoques(local_id)')
       .eq('produto_id', novoItem.produto.id)
       .order('descricao');
     if (error) throw error;
@@ -356,18 +363,48 @@ export default function RequisicaoDetalhe() {
     });
   };
 
+  /* ─ O que dá para pedir, e de onde ─
+     O local do item é o local de RETIRADA: é de lá que a embalagem sai. Pedir
+     retirada de um local que nem estoca o produto é pedido impossível por
+     construção — e o banco não barra, porque requisicao_itens aponta para
+     apresentação e local sem passar por estoques. Então a tela barra.
+
+     É o mesmo recorte que Movimentações faz quando diz "esta apresentação não
+     está vinculada ao local X", só que aqui ele entra antes, escolhendo o que
+     aparece, em vez de recusar depois de escolhido. */
+  const locaisDaApresentacao = (ap) =>
+    locaisEditaveis.filter(l => (ap.estoques ?? []).some(e => e.local_id === l.id));
+
+  const apresentacoesPossiveis = apresentacoes.filter(a => locaisDaApresentacao(a).length > 0);
+  /* Nunca cortar calado: sem este número, quem não acha a embalagem no select
+     não tem como saber que ela existe e só não tem estoque aqui. Mesma lição
+     do rodapé do combobox de produto. */
+  const apresentacoesOcultas = apresentacoes.length - apresentacoesPossiveis.length;
+
   /* A escolha vale enquanto existir na lista atual — trocar de produto troca
      as apresentações, e o id antigo não pode continuar valendo. Derivado, e
      não corrigido por efeito, pelo mesmo motivo de Movimentações. */
   const apresentacaoId =
-    apresentacoes.some(a => String(a.id) === novoItem?.apresentacaoId)
+    apresentacoesPossiveis.some(a => String(a.id) === novoItem?.apresentacaoId)
       ? novoItem.apresentacaoId
-      : (apresentacoes[0] ? String(apresentacoes[0].id) : '');
+      : (apresentacoesPossiveis[0] ? String(apresentacoesPossiveis[0].id) : '');
+
+  const apEscolhida  = apresentacoesPossiveis.find(a => String(a.id) === apresentacaoId) ?? null;
+  const locaisDoItem = apEscolhida ? locaisDaApresentacao(apEscolhida) : [];
+
+  /* Derivado também: o local semeado na abertura do formulário (o da barra
+     superior) pode não estocar a embalagem que a pessoa acabou de escolher. */
+  const localId = locaisDoItem.some(l => String(l.id) === novoItem?.localId)
+    ? novoItem.localId
+    : (locaisDoItem[0] ? String(locaisDoItem[0].id) : '');
 
   const adicionarItem = async () => {
     if (!novoItem.produto)  { setErroForm('Escolha um produto.'); return; }
-    if (!apresentacaoId)    { setErroForm('Este produto não tem apresentação cadastrada.'); return; }
-    if (!novoItem.localId)  { setErroForm('Escolha o local de retirada.'); return; }
+    if (!apresentacaoId)    {
+      setErroForm('Nenhuma embalagem deste produto tem estoque em local que você gerencia.');
+      return;
+    }
+    if (!localId)           { setErroForm('Escolha o local de retirada.'); return; }
     if (!novoItem.quantidade || Number(novoItem.quantidade) <= 0) {
       setErroForm('Informe quanto está sendo pedido.');
       return;
@@ -377,7 +414,7 @@ export default function RequisicaoDetalhe() {
     const { error } = await supabase.from('requisicao_itens').insert([{
       requisicao_id:         Number(id),
       apresentacao_id:       Number(apresentacaoId),
-      local_id:              Number(novoItem.localId),
+      local_id:              Number(localId),
       quantidade_solicitada: Number(novoItem.quantidade),
     }]);
     setSalvando(false);
@@ -866,37 +903,51 @@ export default function RequisicaoDetalhe() {
                 <select
                   value={apresentacaoId}
                   onChange={e => setNovoItem(n => ({ ...n, apresentacaoId: e.target.value }))}
-                  disabled={!novoItem.produto || apresentacoes.length === 0}
+                  disabled={!novoItem.produto || apresentacoesPossiveis.length === 0}
                   className="input-base"
                 >
                   {!novoItem.produto && <option value="">escolha o produto primeiro</option>}
-                  {novoItem.produto && apresentacoes.length === 0 && (
-                    <option value="">este produto não tem apresentação cadastrada</option>
+                  {novoItem.produto && apresentacoesPossiveis.length === 0 && (
+                    <option value="">nenhuma com estoque em local seu</option>
                   )}
-                  {apresentacoes.map(a => (
+                  {apresentacoesPossiveis.map(a => (
                     <option key={a.id} value={a.id}>
                       {a.descricao} · {Number(a.quantidade_unitaria)} {a.unidades?.sigla}
                     </option>
                   ))}
                 </select>
+                {apresentacoesOcultas > 0 && (
+                  <span className="text-[11px] text-amber-600">
+                    {apresentacoesOcultas === 1
+                      ? '1 embalagem deste produto não aparece'
+                      : `${apresentacoesOcultas} embalagens deste produto não aparecem`}
+                    : sem estoque em local que você gerencia.
+                  </span>
+                )}
               </div>
 
               <div className="flex flex-col gap-1.5">
                 <Label required>Local de retirada</Label>
                 <select
-                  value={novoItem.localId}
+                  value={localId}
                   onChange={e => setNovoItem(n => ({ ...n, localId: e.target.value }))}
+                  disabled={locaisDoItem.length === 0}
                   className="input-base"
                 >
-                  {locaisEditaveis.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
+                  {locaisDoItem.length === 0 && (
+                    <option value="">escolha a apresentação primeiro</option>
+                  )}
+                  {locaisDoItem.map(l => <option key={l.id} value={l.id}>{l.nome}</option>)}
                 </select>
-                {/* 3.6: o RLS é o modelo de acesso, não um detalhe de tela — um
-                    gerente só põe item de local que ele gerencia, e a lista
-                    acima mostra só esses. Ser explícito evita a leitura de que
-                    o sistema "perdeu" os outros locais. */}
+                {/* Duas regras somadas, e cada uma tem seu motivo: só local que
+                    estoca a embalagem (daqui sai a retirada) e só local que o
+                    usuário gerencia (3.6 — o RLS é o modelo de acesso, não um
+                    detalhe de tela). Ser explícito evita a leitura de que o
+                    sistema "perdeu" os outros locais. */}
                 <span className="text-[11px] text-app-text-label">
-                  Só os locais que você gerencia. Item de outro local é adicionado por quem
-                  o gerencia — a requisição aceita os dois.
+                  Só locais que já estocam esta embalagem e que você gerencia — é de lá
+                  que ela sai. Item de outro local é adicionado por quem o gerencia; a
+                  requisição aceita os dois.
                 </span>
               </div>
 
@@ -917,6 +968,23 @@ export default function RequisicaoDetalhe() {
                 />
               </div>
             </div>
+
+            {/* Caminho de saída, em vez de beco: quem escolheu um produto que
+                não está estocado em nenhum local seu precisa saber onde se
+                vincula local a embalagem, que é a tela do produto. */}
+            {novoItem.produto && apresentacoesPossiveis.length === 0 && (
+              <p className="text-[12px] text-app-text-secondary">
+                <span className="font-semibold">{novoItem.produto.nome}</span> não tem estoque
+                em nenhum local que você gerencia, então não há de onde retirar.{' '}
+                <Link
+                  to={`/produtos/${novoItem.produto.id}`}
+                  className="font-semibold text-sky-700 hover:underline underline-offset-2"
+                >
+                  Vincular um local a este produto
+                </Link>{' '}
+                — ou pedir a quem gerencia o local que tem o produto.
+              </p>
+            )}
 
             {erroForm && <Aviso texto={erroForm} />}
 
