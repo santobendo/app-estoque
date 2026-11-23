@@ -1,40 +1,28 @@
 # Migrações
 
-**Agora são dois bancos:** testes e produção A. A produção B foi desativada em 11/2026
-por não estar mais em uso — as migrações 01 a 09 chegaram a ser aplicadas nela, mas ela
-não entra mais nesta tabela.
+**Nenhuma migração pendente.** Os dois bancos estão em dia, e é por isso que esta pasta
+está vazia.
 
 | Migração | Testes | Produção A |
 |---|---|---|
-| `10_telas_requisicao.md` | ✓ 16/11/2026 | ✓ 23/11/2026 |
-| `11_requisicao_fechada.md` | ✓ 23/11/2026 | ✓ 23/11/2026 |
+| _(nenhuma pendente)_ | — | — |
 
-Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os dois estiverem
-em dia — foi o que aconteceu com a 09, aplicada nos dois em 09/11/2026 e removida daqui.
+**São dois bancos:** testes e produção A. A produção B foi desativada em 11/2026 por não
+estar mais em uso — as migrações 01 a 09 chegaram a ser aplicadas nela, mas ela não entra
+mais nesta tabela. Migração nova roda **no banco de testes primeiro**.
 
-A **10** prepara as telas dedicadas de requisição: data, encerramento e observação no
-cabeçalho, `update`/`delete` por local em vez de só admin (com dois triggers de proteção
-por coluna), a `vw_requisicoes` com os totais, e a RPC datando o cabeçalho pela
-movimentação. Atenção a uma coisa: a Parte 1 **escreve em linha existente** — preenche
-`data` com o `criado_em` de cada requisição que já existe. É o único update em dado antigo,
-e sem ele as requisições velhas nasceriam datadas do dia em que a migração rodou.
+As migrações **01 a 11** já estão consolidadas no **`estoque_schema_normalizado.sql`**, na
+raiz do projeto, e por isso foram removidas da árvore de trabalho (veja como recuperá-las
+abaixo). As duas últimas a sair foram a **10**, que preparou as telas dedicadas de
+requisição (data, encerramento e observação no cabeçalho, `update`/`delete` por local, a
+`vw_requisicoes` com os totais), e a **11**, que fechou o buraco que o teste da 10
+revelou: `fechada_em` era rótulo, não estado, e pedido encerrado continuava aceitando item
+e entrega. As duas rodaram em produção A em 23/11/2026.
 
-A **11** fecha um buraco que o teste da 10 revelou: `fechada_em` era rótulo, não estado —
-a RPC continuava aceitando entrega contra pedido encerrado, e a tela continuava aceitando
-item novo. Dois triggers `before insert`, um em `requisicao_itens` e um em `movimentacoes`,
-recusam as duas coisas. **Vale para admin e para o SQL Editor também**, ao contrário dos
-triggers de proteção da 10: aqueles são regra de privilégio, este é regra de estado do
-pedido. Para mexer num pedido encerrado, reabra — é um update só. Não escreve em linha
-existente, e o rollback é só derrubar os dois triggers.
-
-Fica valendo o aviso que ela deixou: `create or replace view` **não** preserva o
-`security_invoker`. O `estoque_schema_normalizado.sql` traz a explicação ao lado do
+Um aviso que a 11 deixou e que continua valendo: `create or replace view` **não** preserva
+o `security_invoker`. O `estoque_schema_normalizado.sql` traz a explicação ao lado do
 `alter view` da `vw_auditoria_movimentacoes`, e toda migração que mexer em qualquer das
 cinco views precisa escrever a opção dentro do próprio `create`.
-
-As migrações 01 a 09 já estão consolidadas no **`estoque_schema_normalizado.sql`**, na
-raiz do projeto, e por isso foram removidas da árvore de trabalho (veja como recuperá-las
-abaixo).
 
 ## Como criar um banco novo
 
@@ -51,8 +39,9 @@ seguida — nunca em produção.
 
 Nada foi perdido, só saiu da árvore de trabalho. Cada arquivo viveu até o commit que o
 removeu — `chore: remove as migracoes ja aplicadas` para as migrações 01 a 07, o
-`chore: remove a migracao 08, ja aplicada nos tres bancos` para a 08, e o commit que tirou
-a 09 depois que ela rodou nos dois bancos. O conteúdo está no pai desses commits:
+`chore: remove a migracao 08, ja aplicada nos tres bancos` para a 08, o commit que tirou
+a 09 depois que ela rodou nos dois bancos, e `chore: remove as migracoes 10 e 11, ja
+aplicadas nos dois bancos` para as duas últimas. O conteúdo está no pai desses commits:
 
 ```bash
 # listar o que havia na pasta
@@ -74,7 +63,7 @@ O schema já carrega o **porquê** de cada decisão nos comentários — por que
 mínimo passa por função em vez de policy de UPDATE, por que a reversão de saldo é
 trigger e não RPC, por que as views precisam de `security_invoker`, e assim por diante.
 
-O que **não** está no schema são as receitas de teste. Três são úteis o suficiente para
+O que **não** está no schema são as receitas de teste. Estas são úteis o suficiente para
 valer o `git show` quando chegar a hora:
 
 - **Teste de RLS por usuário real** (seção 2.3 da migração 07): roda dentro de
@@ -92,6 +81,21 @@ valer o `git show` quando chegar a hora:
 - **Teste de preferência do usuário** (migração 09): confere que o `check` de
   `perfis.preferencia_requisicao` recusa valor fora da lista, e que a view de auditoria
   voltou com `{security_invoker=true}` em `reloptions`.
+- **Testes de proteção por coluna** (testes 3 e 4 da migração 10): o gerente edita o
+  próprio pedido, mas trocar responsável ou produto é recusado, e item com entrega não
+  pode ser excluído por não-admin — cada um conferido primeiro como gerente e depois como
+  admin, com a troca de role e de claims que a convenção abaixo descreve.
+- **Teste do pedido encerrado** (teste 2 da migração 11): monta requisição, item e entrega
+  de verdade, encerra, e confere seis vereditos — entrega recusada, item novo recusado,
+  **o saldo do estoque intacto** (é o que prova que o `before insert` chegou antes do
+  `tg_atualiza_estoque`), as duas operações aceitas depois de reabrir, e a movimentação
+  sem requisição passando direto.
+
+Vale também o **porquê** de duas decisões, guardado na nota de rodapé de cada uma: por
+que `quantidade_solicitada` continua obrigatória em vez de distinguir "pedido" de
+"entregue por fora do pedido" — decisão do Matheus em 11/11/2026, com os três casos reais
+que a motivaram (nota da 10) — e onde fica a fronteira entre o que a tela garante por
+cortesia e o que o banco garante por autoridade (nota da 11).
 
 ## Convenção, daqui pra frente
 

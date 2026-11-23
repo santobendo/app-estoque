@@ -479,13 +479,14 @@ caminho que cria quase toda requisição do sistema.
 ## 6. Ordem que eu sugiro
 
 1. ~~Você responde a seção 3~~ — feito em 10 e 11/11/2026
-2. ~~Migração 10, com os testes~~ — escrita em `migracoes/10_telas_requisicao.md`; falta
-   você rodar no banco de testes
+2. ~~Migração 10, com os testes~~ — rodada nos dois bancos (testes em 16/11, produção A
+   em 23/11/2026)
 3. ~~Lista de requisições~~ — feita em 16/11/2026, em `/requisicoes`
 4. ~~Tela da requisição, sem o encerrar~~ — feita em 17/11/2026, em `/requisicoes/:id`
 5. ~~Encerrar e o vínculo com Movimentações~~ — feito em 17/11/2026 (os "extras" saíram
    na resposta da 3.3)
-6. Teste, e aí produção
+6. ~~Teste, e aí produção~~ — o teste de 19/11 achou três coisas (seção 7); corrigidas, a
+   migração 11 rodou nos dois bancos e o código foi para a `main` em 23/11/2026
 7. Depois, em branch dedicada: entrega em lote (3.7b), com a RPC de lote
 
 Os passos 3 a 5 são commits separados na mesma branch, cada um com a tela funcionando.
@@ -547,3 +548,8 @@ instante, que é pior que um spinner.
 **10 e 11 precisam estar em produção A antes do deploy deste código.** A lista e o modal
 leem `fechada_em`, que é da 10; sem ela o `select` quebra na coluna que não existe. E sem a
 11 o furo da 7.1 continua aberto em produção.
+
+Foi nessa ordem: as duas migrações rodaram em produção A em 23/11/2026 e só então a `main`
+subiu. Vale guardar o motivo de a ordem não ser negociável — o `.is('fechada_em', null)` do
+`SecaoRequisicao.jsx` vive **dentro de Movimentações**, que já estava no ar, então código
+na frente do banco não deixaria só a novidade quebrada: derrubaria um fluxo que funcionava.
