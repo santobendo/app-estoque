@@ -6,8 +6,8 @@ não entra mais nesta tabela.
 
 | Migração | Testes | Produção A |
 |---|---|---|
-| `10_telas_requisicao.md` | ✓ 16/11/2026 | |
-| `11_requisicao_fechada.md` | ✓ 23/11/2026 | |
+| `10_telas_requisicao.md` | ✓ 16/11/2026 | ✓ 23/11/2026 |
+| `11_requisicao_fechada.md` | ✓ 23/11/2026 | ✓ 23/11/2026 |
 
 Rodar no banco de testes primeiro. A pasta volta a ficar vazia quando os dois estiverem
 em dia — foi o que aconteceu com a 09, aplicada nos dois em 09/11/2026 e removida daqui.
